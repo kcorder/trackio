@@ -935,13 +935,9 @@
   .group-by-row {
     margin-top: 8px;
   }
-  .config-filter-row, .group-key-list { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
-  .config-filter-field { flex: 1; min-width: 0; }
-  .remove-config-filter, .group-key-chip button { border: 0; background: transparent; color: var(--body-text-color-subdued, #9ca3af); cursor: pointer; }
-  .remove-config-filter { width: 20px; height: 30px; flex-shrink: 0; font-size: 18px; }
-  .remove-config-filter:hover, .group-key-chip button:hover { color: var(--body-text-color, #1f2937); }
-  .add-config-filter { margin-top: 8px; padding: 5px 8px; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-md, 6px); background: var(--background-fill-primary, white); color: var(--body-text-color, #1f2937); font: inherit; font-size: 12px; cursor: pointer; }
-  .add-config-filter:hover { background: var(--background-fill-secondary, #f9fafb); }
+  .group-key-list { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+  .group-key-chip button { border: 0; background: transparent; color: var(--body-text-color-subdued, #9ca3af); cursor: pointer; }
+  .group-key-chip button:hover { color: var(--body-text-color, #1f2937); }
   .sync-metrics-btn { padding: 6px 10px; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-md, 6px); background: var(--background-fill-primary, white); color: var(--body-text-color, #1f2937); font: inherit; cursor: pointer; }
   .sync-metrics-btn:hover { background: var(--background-fill-secondary, #f9fafb); }
   .group-key-list { flex-wrap: wrap; }

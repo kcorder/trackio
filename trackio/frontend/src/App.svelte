@@ -43,7 +43,6 @@
     watchNarrowViewport,
   } from "./lib/viewport.js";
   import { reconcileSelectedRuns } from "./lib/selection.js";
-  import { filterMetricsByRegex } from "./lib/dataProcessing.js";
   import {
     getPageFromPath,
     navigateTo,
@@ -680,7 +679,6 @@
       bind:showComparer
       bind:configFilters
       bind:filterText
-      bind:configFilters
       bind:groupByKeys
       bind:showGroupedMean
       {metricColumns}
