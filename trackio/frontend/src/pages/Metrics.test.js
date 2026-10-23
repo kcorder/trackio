@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mount, tick, unmount } from "svelte";
 import Metrics from "./Metrics.svelte";
+import MetricsGroupingTestHarness from "./MetricsGroupingTestHarness.svelte";
 import { getLogsBatch } from "../lib/api.js";
 
 vi.mock("../lib/api.js", () => ({ getLogsBatch: vi.fn() }));
@@ -61,6 +62,23 @@ describe("Metrics loading", () => {
     expect(getLogsBatch.mock.calls.map((call) => call[1].length)).toEqual([8, 8, 1]);
     expect(target.querySelector(".plot-container")).toBeNull();
     observers[0].trigger(true);
+    await tick();
+    expect(target.querySelector(".plot-container")).not.toBeNull();
+    observers[0].trigger(false);
+    await tick();
+    expect(target.querySelector(".plot-container")).not.toBeNull();
+  });
+
+  test("keeps a mounted chart after grouping and a later offscreen event", async () => {
+    component = mount(MetricsGroupingTestHarness, { target });
+    await vi.waitFor(() => expect(target.querySelectorAll(".plot-slot")).toHaveLength(1));
+    observers[0].trigger(true);
+    await tick();
+    expect(target.querySelector(".plot-container")).not.toBeNull();
+    target.querySelector("button").click();
+    await tick();
+    expect(target.querySelector(".plot-container")).not.toBeNull();
+    observers[0].trigger(false);
     await tick();
     expect(target.querySelector(".plot-container")).not.toBeNull();
   });

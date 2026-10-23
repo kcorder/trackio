@@ -162,18 +162,14 @@
       return;
     }
     const observer = new IntersectionObserver((entries) => {
-      const next = new Set(nearMetrics);
-      if (entries[entries.length - 1]?.isIntersecting) next.add(metric);
-      else next.delete(metric);
-      nearMetrics = next;
+      if (entries[entries.length - 1]?.isIntersecting && !nearMetrics.has(metric)) {
+        nearMetrics = new Set([...nearMetrics, metric]);
+      }
     }, { rootMargin: "600px 0px" });
     observer.observe(node);
     return {
       destroy() {
         observer.disconnect();
-        const next = new Set(nearMetrics);
-        next.delete(metric);
-        nearMetrics = next;
       },
     };
   }
@@ -419,6 +415,7 @@
     if (cacheProject !== project) {
       rawDataCache = new Map();
       processedDataCache = new Map();
+      nearMetrics = new Set();
       cacheProject = project;
       hasLoaded = false;
     }
@@ -595,7 +592,7 @@
       >
         {#if orderedDirect.length > 0}
           <div class="plot-grid" class:auto={autoLayout} style="--cols: {directCols}">
-            {#each orderedDirect as metric, i}
+            {#each orderedDirect as metric, i (metric)}
               <div class="plot-slot" use:observeMetric={metric}>
                 {#if nearMetrics.has(metric)}
                   {@const plotResult = getPlotResult(metric)}
@@ -657,7 +654,7 @@
               hidden={!showHeaders}
             >
               <div class="plot-grid" class:auto={autoLayout} style="--cols: {subCols}">
-                {#each orderedSub as metric, i}
+                {#each orderedSub as metric, i (metric)}
                   <div class="plot-slot" use:observeMetric={metric}>
                     {#if nearMetrics.has(metric)}
                       {@const plotResult = getPlotResult(metric)}
