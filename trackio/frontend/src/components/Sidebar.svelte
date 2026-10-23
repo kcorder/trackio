@@ -37,6 +37,8 @@
     logScaleY = $bindable(false),
     metricFilter = $bindable(""),
     realtimeEnabled = $bindable(true),
+    metricRefreshInterval = $bindable("auto"),
+    onSyncMetrics = null,
     showHeaders = $bindable(true),
     showComparer = $bindable(false),
     filterText = $bindable(""),
@@ -546,10 +548,26 @@
           <span class="section-label">Display Settings</span>
 
           <div class="section">
-            <GradioCheckbox
-              label="Refresh metrics realtime"
-              bind:checked={realtimeEnabled}
-            />
+            {#if currentPage === "metrics"}
+              <Dropdown
+                label="Metric refresh"
+                choices={[
+                  { label: "Auto (5s / 15s)", value: "auto" },
+                  { label: "Off", value: 0 },
+                  { label: "Every 5 seconds", value: 5000 },
+                  { label: "Every 15 seconds", value: 15000 },
+                  { label: "Every 30 seconds", value: 30000 },
+                ]}
+                bind:value={metricRefreshInterval}
+                filterable={false}
+              />
+              <button type="button" class="sync-metrics-btn" onclick={() => onSyncMetrics?.()}>Sync now</button>
+            {:else}
+              <GradioCheckbox
+                label="Refresh metrics realtime"
+                bind:checked={realtimeEnabled}
+              />
+            {/if}
             <GradioCheckbox
               label="Show section headers"
               bind:checked={showHeaders}
@@ -953,6 +971,8 @@
   .remove-config-filter:hover, .group-key-chip button:hover { color: var(--body-text-color, #1f2937); }
   .add-config-filter { margin-top: 8px; padding: 5px 8px; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-md, 6px); background: var(--background-fill-primary, white); color: var(--body-text-color, #1f2937); font: inherit; font-size: 12px; cursor: pointer; }
   .add-config-filter:hover { background: var(--background-fill-secondary, #f9fafb); }
+  .sync-metrics-btn { padding: 6px 10px; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-md, 6px); background: var(--background-fill-primary, white); color: var(--body-text-color, #1f2937); font: inherit; cursor: pointer; }
+  .sync-metrics-btn:hover { background: var(--background-fill-secondary, #f9fafb); }
   .group-key-list { flex-wrap: wrap; }
   .group-key-chip { background: var(--background-fill-secondary, #f3f4f6); border-radius: 4px; padding: 2px 5px; font-size: 12px; }
   .grouped-runs {

@@ -28,6 +28,7 @@
   } from "./lib/api.js";
   import {
     getAppPollIntervalMs,
+    effectiveMetricRefreshInterval,
     isRateLimitCooldownActive,
     isTabHidden,
   } from "./lib/hostPolling.js";
@@ -97,6 +98,8 @@
   let logScaleY = $state(false);
   let metricFilter = $state("");
   let realtimeEnabled = $state(true);
+  let metricRefreshInterval = $state("auto");
+  let metricSyncToken = $state(0);
   let showHeaders = $state(true);
   let showComparer = $state(false);
   let filterText = $state("");
@@ -115,6 +118,7 @@
   let urlTick = $state(0);
   let alerts = $state([]);
   let pollTimer = $state(null);
+  let lastAppRefreshAt = 0;
   let mutationStatus = $state({
     spaces: false,
     allowed: true,
@@ -272,7 +276,9 @@
         );
       }
       if (configs != null) {
-        runConfigs = configs;
+        if (JSON.stringify(runConfigs) !== JSON.stringify(configs)) {
+          runConfigs = configs;
+        }
         runConfigsProject = project;
       }
     } catch (e) {
@@ -353,8 +359,13 @@
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(async () => {
       if (!realtimeEnabled) return;
+      if (currentPage === "metrics") {
+        const interval = effectiveMetricRefreshInterval(metricRefreshInterval, selectedRuns.length);
+        if (interval === 0 || Date.now() - lastAppRefreshAt < interval) return;
+      }
       if (isTabHidden()) return;
       if (isRateLimitCooldownActive()) return;
+      lastAppRefreshAt = Date.now();
       await refreshProjects();
       await refreshRuns();
       await refreshAlerts();
@@ -521,6 +532,7 @@
       }
 
       if (!staticMode) {
+        lastAppRefreshAt = Date.now();
         startPolling();
       }
     })();
@@ -640,6 +652,11 @@
       bind:logScaleY
       bind:metricFilter
       bind:realtimeEnabled
+      bind:metricRefreshInterval
+      onSyncMetrics={async () => {
+        await refreshRuns();
+        metricSyncToken += 1;
+      }}
       bind:showHeaders
       bind:showComparer
       bind:filterText
@@ -700,6 +717,8 @@
           {appBootstrapReady}
           {plotOrder}
           {realtimeEnabled}
+          refreshInterval={metricRefreshInterval}
+          syncToken={metricSyncToken}
           bind:metricColumns
         />
       {:else if currentPage === "traces"}

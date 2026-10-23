@@ -147,6 +147,27 @@ export function getMetricColumns(rows) {
   return getNumericColumns(rows).filter((c) => !RESERVED_KEYS.includes(c));
 }
 
+export function summarizeMetricRows(rows, xColumn) {
+  const columns = new Set();
+  const counts = new Map();
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue;
+      if (RESERVED_KEYS.includes(key) || key === "data_type" || key === "x_axis") continue;
+      columns.add(key);
+      const countKey = `${key}\0${row.series_key}`;
+      counts.set(countKey, (counts.get(countKey) || 0) + 1);
+    }
+  }
+  const availableColumns = [...columns];
+  const metrics = availableColumns.filter((key) => key !== xColumn);
+  const singlePointMetrics = new Set(metrics);
+  for (const [key, count] of counts) {
+    if (count > 1) singlePointMetrics.delete(key.split("\0")[0]);
+  }
+  return { availableColumns, metrics, singlePointMetrics };
+}
+
 export function computeMetricPlotData(masterData, xColumn, metric, xLim) {
   let relevant = masterData.filter(
     (r) => r[metric] != null && r[metric] !== undefined,
@@ -196,7 +217,7 @@ export function computeMetricPlotData(masterData, xColumn, metric, xLim) {
   };
 }
 
-function downsampleImpl(data, x, y, colorField, xLim, extraFields = []) {
+function downsampleImpl(data, x, y, colorField, xLim, extraFields = [], nBins = 100) {
   const columns = [x, y];
   if (colorField && Object.hasOwn(data[0], colorField)) {
     columns.push(colorField);
@@ -232,12 +253,10 @@ function downsampleImpl(data, x, y, colorField, xLim, extraFields = []) {
   }
 
   const result = [];
-  const nBins = 100;
-
   Object.values(groups).forEach((groupData) => {
     groupData.sort((a, b) => (a[x] || 0) - (b[x] || 0));
 
-    if (groupData.length < 500) {
+    if (groupData.length <= nBins * 2) {
       result.push(...groupData);
       return;
     }
@@ -246,7 +265,14 @@ function downsampleImpl(data, x, y, colorField, xLim, extraFields = []) {
     const gXMax = updatedXLim ? updatedXLim[1] : dataXMax;
 
     if (gXMin === gXMax) {
-      result.push(...groupData);
+      let minRow = groupData[0];
+      let maxRow = groupData[0];
+      for (const row of groupData) {
+        if (row[y] < minRow[y]) minRow = row;
+        if (row[y] > maxRow[y]) maxRow = row;
+      }
+      result.push(minRow);
+      if (minRow !== maxRow) result.push(maxRow);
       return;
     }
 
@@ -304,8 +330,9 @@ export function downsample(data, x, y, colorField, xLim, extraFields = []) {
     }
     const merged = [];
     let mergedXLim = xLim;
+    const bins = Math.max(2, Math.min(100, Math.floor(5000 / (2 * chunks.size))));
     for (const chunk of chunks.values()) {
-      const out = downsampleImpl(chunk, x, y, colorField, xLim, extraFields);
+      const out = downsampleImpl(chunk, x, y, colorField, xLim, extraFields, bins);
       merged.push(...out.data);
       mergedXLim = out.xLim;
     }
@@ -313,7 +340,11 @@ export function downsample(data, x, y, colorField, xLim, extraFields = []) {
     return { data: merged, xLim: mergedXLim };
   }
 
-  return downsampleImpl(data, x, y, colorField, xLim, extraFields);
+  const seriesCount = colorField
+    ? new Set(data.map((row) => row[colorField] ?? "__default")).size
+    : 1;
+  const bins = Math.max(2, Math.min(100, Math.floor(5000 / (2 * seriesCount))));
+  return downsampleImpl(data, x, y, colorField, xLim, extraFields, bins);
 }
 
 export function groupMetricsByPrefix(metrics, plotOrder = []) {

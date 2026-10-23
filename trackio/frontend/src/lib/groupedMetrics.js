@@ -35,13 +35,13 @@ function prepareRunPoints(rows) {
   };
 }
 
-function sharedGrid(groupRuns) {
+function sharedGrid(groupRuns, maxGridPoints = MAX_GRID_POINTS) {
   const allX = [...new Set(groupRuns.flatMap(({ points }) => points.map((point) => point.x)))].sort((a, b) => a - b);
-  if (allX.length <= MAX_GRID_POINTS) return allX;
+  if (allX.length <= maxGridPoints) return allX;
   const first = allX[0];
   const last = allX[allX.length - 1];
-  const step = (last - first) / (MAX_GRID_POINTS - 1);
-  const grid = Array.from({ length: MAX_GRID_POINTS }, (_, i) => i === MAX_GRID_POINTS - 1 ? last : first + i * step);
+  const step = (last - first) / (maxGridPoints - 1);
+  const grid = Array.from({ length: maxGridPoints }, (_, i) => i === maxGridPoints - 1 ? last : first + i * step);
   // Preserve each run's endpoints, including singleton runs, even on a capped grid.
   for (const { points } of groupRuns) {
     grid.push(points[0].x, points[points.length - 1].x);
@@ -88,13 +88,14 @@ export function computeGroupedMetric(masterData, metric, xColumn, runs, runConfi
   }
 
   const rows = [];
+  const gridPoints = Math.min(MAX_GRID_POINTS, Math.max(2, Math.floor(5000 / byGroup.size)));
   for (const { group, runs: groupRuns } of byGroup.values()) {
     const displayGaps = groupRuns.map((run) => run.maxGap).filter((gap) => gap > 0);
     const maxDisplayGap = displayGaps.length ? median(displayGaps) : Infinity;
     let segment = 0;
     let previousX = null;
     let missingPoint = false;
-    for (const x of sharedGrid(groupRuns)) {
+    for (const x of sharedGrid(groupRuns, gridPoints)) {
       let n = 0;
       let mean = 0;
       let runMin = Infinity;

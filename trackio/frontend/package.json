@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src/",
+    "bench:metrics": "node scripts/benchmark-metrics.mjs",
     "test": "vitest run"
   },
   "devDependencies": {

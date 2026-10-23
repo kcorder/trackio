@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { getQueryParam } from "../lib/router.js";
   import LinePlot from "../components/LinePlot.svelte";
   import BarPlot from "../components/BarPlot.svelte";
@@ -10,13 +10,13 @@
   import { getLogsBatch } from "../lib/api.js";
   import {
     createPollingTask,
-    getMetricsPollIntervalMs,
+    effectiveMetricRefreshInterval,
     isRateLimitCooldownActive,
     isTabHidden,
   } from "../lib/hostPolling.js";
   import {
     processRunData,
-    getMetricColumns,
+    summarizeMetricRows,
     groupMetricsByPrefix,
     filterMetricsByRegex,
     computeMetricPlotData,
@@ -50,6 +50,8 @@
     appBootstrapReady = false,
     plotOrder = [],
     realtimeEnabled = true,
+    refreshInterval = "auto",
+    syncToken = 0,
     // eslint-disable-next-line no-useless-assignment -- bindable out-prop to parent
     metricColumns = $bindable([]),
   } = $props();
@@ -67,9 +69,14 @@
   let pageElement = $state(null);
 
   let rawDataCache = new Map();
+  let processedDataCache = new Map();
+  let cacheProject = null;
+  let nearMetrics = $state(new Set());
+  let lastSyncToken = null;
   let refreshTimer = null;
   const refreshTask = createPollingTask();
   const MAX_BATCH_RUNS = 64;
+  const INITIAL_BATCH_RUNS = 8;
 
   let colorMap = $derived(buildColorMap(allRuns));
   let groupedMode = $derived(showGroupedMean && groupByKeys.length > 0);
@@ -79,6 +86,16 @@
     selectedRuns;
     runConfigs;
     groupByKeys;
+    return new Map();
+  });
+  let plotCache = $derived.by(() => {
+    masterData;
+    xColumn;
+    xLim;
+    selectedRuns;
+    runConfigs;
+    groupByKeys;
+    showGroupedMean;
     return new Map();
   });
   let plotColorMap = $derived.by(() => {
@@ -102,7 +119,13 @@
   );
 
   function getPlotResult(metric) {
-    if (!groupByKeys.length) return computeMetricPlotData(masterData, xColumn, metric, xLim);
+    const cached = plotCache.get(metric);
+    if (cached) return cached;
+    if (!groupByKeys.length) {
+      const result = computeMetricPlotData(masterData, xColumn, metric, xLim);
+      plotCache.set(metric, result);
+      return result;
+    }
     let result = groupCache.get(metric);
     if (!result) {
       result = computeGroupedMetric(masterData, metric, xColumn, selectedRuns, runConfigs, groupByKeys, runGroups);
@@ -111,7 +134,9 @@
     const csvExports = groupedCsvExports(result, metric, xColumn,
       () => buildRawGroupedRows(rawDataCache, metric, xAxis, selectedRuns, runConfigs, groupByKeys));
     if (!groupedMode) {
-      return { ...computeMetricPlotData(masterData, xColumn, metric, xLim), csvExports };
+      const plot = { ...computeMetricPlotData(masterData, xColumn, metric, xLim), csvExports };
+      plotCache.set(metric, plot);
+      return plot;
     }
     const visible = xLim
       ? result.rows.filter((row) => row[xColumn] >= xLim[0] && row[xColumn] <= xLim[1])
@@ -122,10 +147,34 @@
       yMin = Math.min(yMin, row.run_min ?? row[metric]);
       yMax = Math.max(yMax, row.run_max ?? row[metric]);
     }
-    return {
+    const plot = {
       data: visible,
       yExtent: visible.length ? [yMin, yMax] : undefined,
       csvExports,
+    };
+    plotCache.set(metric, plot);
+    return plot;
+  }
+
+  function observeMetric(node, metric) {
+    if (typeof IntersectionObserver === "undefined") {
+      nearMetrics = new Set([...nearMetrics, metric]);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      const next = new Set(nearMetrics);
+      if (entries[entries.length - 1]?.isIntersecting) next.add(metric);
+      else next.delete(metric);
+      nearMetrics = next;
+    }, { rootMargin: "600px 0px" });
+    observer.observe(node);
+    return {
+      destroy() {
+        observer.disconnect();
+        const next = new Set(nearMetrics);
+        next.delete(metric);
+        nearMetrics = next;
+      },
     };
   }
 
@@ -217,10 +266,22 @@
     }
 
     const allRows = [];
+    const settingsKey = `${smoothing}\0${xAxis}\0${logScaleX}\0${logScaleY}`;
     for (const run of selectedRuns) {
-      const logs = rawDataCache.get(run.id ?? run.name);
+      const runKey = run.id ?? run.name;
+      const logs = rawDataCache.get(runKey);
       if (!logs) continue;
-      const result = processRunData(logs, run, smoothing, xAxis, logScaleX, logScaleY);
+      let cached = processedDataCache.get(runKey);
+      if (!cached || cached.logs !== logs || cached.settingsKey !== settingsKey || cached.runName !== run.name) {
+        cached = {
+          logs,
+          settingsKey,
+          runName: run.name,
+          result: processRunData(logs, run, smoothing, xAxis, logScaleX, logScaleY),
+        };
+        processedDataCache.set(runKey, cached);
+      }
+      const result = cached.result;
       if (result) {
         allRows.push(...result.rows);
         xColumn = result.xColumn;
@@ -232,46 +293,30 @@
       (r) => r.data_type === "original" || !r.data_type,
     );
     extractHistograms(originals);
-    const allCols = getMetricColumns(originals).filter(
-      (c) => c !== "run" && c !== "data_type" && c !== "x_axis",
-    );
-    const cols = allCols.filter((c) => c !== xColumn);
-    metrics = cols;
-    metricColumns = allCols;
-
-    const countPerRunMetric = new Map();
-    for (const r of originals) {
-      const run = r.series_key;
-      for (const col of cols) {
-        if (r[col] == null) continue;
-        const key = `${col}\0${run}`;
-        countPerRunMetric.set(key, (countPerRunMetric.get(key) || 0) + 1);
-      }
-    }
-    const sp = new Set(cols);
-    for (const [key, count] of countPerRunMetric) {
-      if (count > 1) {
-        sp.delete(key.split("\0")[0]);
-      }
-    }
-    singlePointMetrics = sp;
+    const summary = summarizeMetricRows(originals, xColumn);
+    metrics = summary.metrics;
+    metricColumns = summary.availableColumns;
+    singlePointMetrics = summary.singlePointMetrics;
   }
 
   async function fetchLogsForRuns(
     runs,
     requestOptions = {},
     projectName = project,
+    chunkSize = MAX_BATCH_RUNS,
+    onChunk = null,
   ) {
     const results = [];
-    for (let i = 0; i < runs.length; i += MAX_BATCH_RUNS) {
-      const chunk = runs.slice(i, i + MAX_BATCH_RUNS);
+    for (let i = 0; i < runs.length; i += chunkSize) {
+      const chunk = runs.slice(i, i + chunkSize);
       const batch = await getLogsBatch(
         projectName,
         chunk,
         { scalar_only: true },
         requestOptions,
       );
-      results.push(...batch);
+      if (!onChunk) results.push(...batch);
+      if (onChunk) onChunk(batch, i === 0, i + chunk.length >= runs.length);
     }
     return results;
   }
@@ -296,37 +341,44 @@
       const runKey = run.id ?? run.name;
       return !rawDataCache.has(runKey);
     });
-    let fetched = false;
     if (needFetch.length > 0) {
       try {
-        const batch = await fetchLogsForRuns(
+        await fetchLogsForRuns(
           needFetch,
           { signal },
           requestedProject,
+          INITIAL_BATCH_RUNS,
+          (batch, first, last) => {
+            if (signal.aborted || requestedProject !== project) return;
+            for (const entry of batch) {
+              const runKey = entry.run_id ?? entry.run;
+              rawDataCache.set(runKey, entry.logs);
+            }
+            if (first || last) {
+              processFromCache();
+              hasLoaded = true;
+            }
+          },
         );
         if (signal.aborted || requestedProject !== project) return;
-        for (const entry of batch) {
-          const runKey = entry.run_id ?? entry.run;
-          rawDataCache.set(runKey, entry.logs);
-          fetched = true;
-        }
       } catch (e) {
         if (e?.name === "AbortError") return;
         console.error("Failed to load metric logs:", e);
       }
     }
 
-    if (fetched || !hasLoaded) {
+    if (needFetch.length === 0 || !hasLoaded) {
       processFromCache();
     }
     hasLoaded = true;
   }
 
-  async function refreshCachedRuns() {
-    if (!realtimeEnabled) return;
+  async function refreshCachedRuns(force = false) {
+    if (!force && (!realtimeEnabled || refreshInterval === 0)) return;
     if (!project || selectedRuns.length === 0) return;
-    if (isTabHidden()) return;
-    if (isRateLimitCooldownActive()) return;
+    if (!force && isTabHidden()) return;
+    if (!force && isRateLimitCooldownActive()) return;
+    if (force) refreshTask.cancel();
     try {
       await refreshTask.run(async (signal) => {
         const requestedProject = project;
@@ -364,8 +416,22 @@
     selectedRuns;
     appBootstrapReady;
     refreshTask.cancel();
-    rawDataCache = project ? rawDataCache : new Map();
+    if (cacheProject !== project) {
+      rawDataCache = new Map();
+      processedDataCache = new Map();
+      cacheProject = project;
+      hasLoaded = false;
+    }
     void refreshTask.run(fetchNewRuns, null);
+  });
+
+  $effect(() => {
+    if (lastSyncToken === null) {
+      lastSyncToken = syncToken;
+    } else if (syncToken !== lastSyncToken) {
+      lastSyncToken = syncToken;
+      untrack(() => void refreshCachedRuns(true));
+    }
   });
 
   $effect(() => {
@@ -388,13 +454,21 @@
         xLim = [lo, hi];
       }
     }
-    refreshTimer = setInterval(
-      refreshCachedRuns,
-      getMetricsPollIntervalMs(),
-    );
     return () => {
       if (refreshTimer) clearInterval(refreshTimer);
       refreshTask.cancel();
+    };
+  });
+
+  $effect(() => {
+    if (refreshTimer) clearInterval(refreshTimer);
+    const ms = effectiveMetricRefreshInterval(refreshInterval, selectedRuns.length);
+    if (realtimeEnabled && ms > 0) {
+      refreshTimer = setInterval(() => void refreshCachedRuns(), ms);
+    }
+    return () => {
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = null;
     };
   });
 
@@ -522,48 +596,52 @@
         {#if orderedDirect.length > 0}
           <div class="plot-grid" class:auto={autoLayout} style="--cols: {directCols}">
             {#each orderedDirect as metric, i}
-              {@const plotResult = getPlotResult(metric)}
-              {@const plotData = plotResult.data}
-              {@const yExtent = plotResult.yExtent}
-              {@const useBar = singlePointMetrics.has(metric)}
-              {@const directTitle = showHeaders ? metric.split("/").slice(1).join("/") || metric : metric}
-              {#if plotData.length > 0}
-                {#if useBar}
-                  <BarPlot
-                    data={plotData}
-                    csvExports={plotResult.csvExports}
-                    y={metric}
-                    title={directTitle}
-                    colorField="series_key"
-                    colorDisplayField="run"
-                    colorMap={plotColorMap}
-                    draggable={true}
-                    ondragstart={(e) => handleDragStart(directKey, i, e)}
-                    ondragover={(e) => handleDragOver(directKey, i, e)}
-                    ondrop={(e) => handleDrop(directKey, i, orderedDirect, e)}
-                  />
-                {:else}
-                  <LinePlot
-                    data={plotData}
-                    csvExports={plotResult.csvExports}
-                    rangeBand={groupedMode}
-                    x={xColumn}
-                    y={metric}
-                    title={directTitle}
-                    colorField="series_key"
-                    colorDisplayField="run"
-                    colorMap={plotColorMap}
-                    {xLim}
-                    {yExtent}
-                    onSelect={handlePlotSelect}
-                    onResetZoom={handleResetZoom}
-                    draggable={true}
-                    ondragstart={(e) => handleDragStart(directKey, i, e)}
-                    ondragover={(e) => handleDragOver(directKey, i, e)}
-                    ondrop={(e) => handleDrop(directKey, i, orderedDirect, e)}
-                  />
+              <div class="plot-slot" use:observeMetric={metric}>
+                {#if nearMetrics.has(metric)}
+                  {@const plotResult = getPlotResult(metric)}
+                  {@const plotData = plotResult.data}
+                  {@const yExtent = plotResult.yExtent}
+                  {@const useBar = singlePointMetrics.has(metric)}
+                  {@const directTitle = showHeaders ? metric.split("/").slice(1).join("/") || metric : metric}
+                  {#if plotData.length > 0}
+                    {#if useBar}
+                      <BarPlot
+                        data={plotData}
+                        csvExports={plotResult.csvExports}
+                        y={metric}
+                        title={directTitle}
+                        colorField="series_key"
+                        colorDisplayField="run"
+                        colorMap={plotColorMap}
+                        draggable={true}
+                        ondragstart={(e) => handleDragStart(directKey, i, e)}
+                        ondragover={(e) => handleDragOver(directKey, i, e)}
+                        ondrop={(e) => handleDrop(directKey, i, orderedDirect, e)}
+                      />
+                    {:else}
+                      <LinePlot
+                        data={plotData}
+                        csvExports={plotResult.csvExports}
+                        rangeBand={groupedMode}
+                        x={xColumn}
+                        y={metric}
+                        title={directTitle}
+                        colorField="series_key"
+                        colorDisplayField="run"
+                        colorMap={plotColorMap}
+                        {xLim}
+                        {yExtent}
+                        onSelect={handlePlotSelect}
+                        onResetZoom={handleResetZoom}
+                        draggable={true}
+                        ondragstart={(e) => handleDragStart(directKey, i, e)}
+                        ondragover={(e) => handleDragOver(directKey, i, e)}
+                        ondrop={(e) => handleDrop(directKey, i, orderedDirect, e)}
+                      />
+                    {/if}
+                  {/if}
                 {/if}
-              {/if}
+              </div>
             {/each}
           </div>
         {/if}
@@ -580,48 +658,52 @@
             >
               <div class="plot-grid" class:auto={autoLayout} style="--cols: {subCols}">
                 {#each orderedSub as metric, i}
-                  {@const plotResult = getPlotResult(metric)}
-                  {@const plotData = plotResult.data}
-                  {@const yExtent = plotResult.yExtent}
-                  {@const useBar = singlePointMetrics.has(metric)}
-                  {@const subTitle = showHeaders ? metric.split("/").slice(2).join("/") || metric : metric}
-                  {#if plotData.length > 0}
-                    {#if useBar}
-                      <BarPlot
-                        data={plotData}
-                        csvExports={plotResult.csvExports}
-                        y={metric}
-                        title={subTitle}
-                        colorField="series_key"
-                        colorDisplayField="run"
-                        colorMap={plotColorMap}
-                        draggable={true}
-                        ondragstart={(e) => handleDragStart(subKey, i, e)}
-                        ondragover={(e) => handleDragOver(subKey, i, e)}
-                        ondrop={(e) => handleDrop(subKey, i, orderedSub, e)}
-                      />
-                    {:else}
-                      <LinePlot
-                        data={plotData}
-                        csvExports={plotResult.csvExports}
-                        rangeBand={groupedMode}
-                        x={xColumn}
-                        y={metric}
-                        title={subTitle}
-                        colorField="series_key"
-                        colorDisplayField="run"
-                        colorMap={plotColorMap}
-                        {xLim}
-                        {yExtent}
-                        onSelect={handlePlotSelect}
-                        onResetZoom={handleResetZoom}
-                        draggable={true}
-                        ondragstart={(e) => handleDragStart(subKey, i, e)}
-                        ondragover={(e) => handleDragOver(subKey, i, e)}
-                        ondrop={(e) => handleDrop(subKey, i, orderedSub, e)}
-                      />
+                  <div class="plot-slot" use:observeMetric={metric}>
+                    {#if nearMetrics.has(metric)}
+                      {@const plotResult = getPlotResult(metric)}
+                      {@const plotData = plotResult.data}
+                      {@const yExtent = plotResult.yExtent}
+                      {@const useBar = singlePointMetrics.has(metric)}
+                      {@const subTitle = showHeaders ? metric.split("/").slice(2).join("/") || metric : metric}
+                      {#if plotData.length > 0}
+                        {#if useBar}
+                          <BarPlot
+                            data={plotData}
+                            csvExports={plotResult.csvExports}
+                            y={metric}
+                            title={subTitle}
+                            colorField="series_key"
+                            colorDisplayField="run"
+                            colorMap={plotColorMap}
+                            draggable={true}
+                            ondragstart={(e) => handleDragStart(subKey, i, e)}
+                            ondragover={(e) => handleDragOver(subKey, i, e)}
+                            ondrop={(e) => handleDrop(subKey, i, orderedSub, e)}
+                          />
+                        {:else}
+                          <LinePlot
+                            data={plotData}
+                            csvExports={plotResult.csvExports}
+                            rangeBand={groupedMode}
+                            x={xColumn}
+                            y={metric}
+                            title={subTitle}
+                            colorField="series_key"
+                            colorDisplayField="run"
+                            colorMap={plotColorMap}
+                            {xLim}
+                            {yExtent}
+                            onSelect={handlePlotSelect}
+                            onResetZoom={handleResetZoom}
+                            draggable={true}
+                            ondragstart={(e) => handleDragStart(subKey, i, e)}
+                            ondragover={(e) => handleDragOver(subKey, i, e)}
+                            ondrop={(e) => handleDrop(subKey, i, orderedSub, e)}
+                          />
+                        {/if}
+                      {/if}
                     {/if}
-                  {/if}
+                  </div>
                 {/each}
               </div>
             </Accordion>
@@ -689,6 +771,10 @@
   .plot-grid :global(.plot-container) {
     min-width: 0;
     width: 100%;
+  }
+  .plot-slot {
+    min-width: 0;
+    min-height: 370px;
   }
   .subgroup-list {
     margin-top: 16px;

@@ -99,4 +99,15 @@ describe("grouped metric aggregation", () => {
     expect(result.rows.at(-1).step).toBe(4999);
     expect(result.rows[0].n).toBe(1);
   });
+
+  test("shares a point budget across many distinct groups", () => {
+    const manyRuns = Array.from({ length: 70 }, (_, index) => ({ id: `run-${index}`, name: `run-${index}` }));
+    const manyConfigs = Object.fromEntries(manyRuns.map((run) => [run.id, { args: { model: run.id } }]));
+    const rows = manyRuns.flatMap((run) => Array.from({ length: 1500 }, (_, step) => ({
+      run_id: run.id, step, loss: step / 1500,
+    })));
+    const result = computeGroupedMetric(rows, "loss", "step", manyRuns, manyConfigs, [key]);
+    expect(result.rows.length).toBeLessThanOrEqual(5000);
+    expect(new Set(result.rows.map((row) => row.group)).size).toBe(70);
+  });
 });
