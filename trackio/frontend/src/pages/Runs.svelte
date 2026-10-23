@@ -11,11 +11,14 @@
   import { openRunDetail } from "../lib/router.js";
   import { buildColorMap } from "../lib/stores.js";
   import { filterMetricsByRegex } from "../lib/dataProcessing.js";
+  import { filterRunsByConfig } from "../lib/grouping.js";
 
   let {
     project = null,
     runs = [],
     filterText = "",
+    runConfigs = {},
+    configFilters = [],
     onRunsChanged = null,
     runMutationAllowed = true,
   } = $props();
@@ -39,9 +42,11 @@
   let renameInput = $state(null);
 
   let filteredRuns = $derived.by(() => {
-    if (!filterText || !filterText.trim()) return runsData;
-    const matches = new Set(filterMetricsByRegex(runsData.map((r) => r.name), filterText));
-    return runsData.filter((r) => matches.has(r.name));
+    const matches = filterText?.trim()
+      ? new Set(filterMetricsByRegex(runsData.map((r) => r.name), filterText))
+      : null;
+    const named = matches ? runsData.filter((r) => matches.has(r.name)) : runsData;
+    return filterRunsByConfig(named, runConfigs, configFilters);
   });
 
   let selectedVisibleRuns = $derived(
@@ -211,7 +216,7 @@
       <p>Refresh this page or wait for the dashboard to poll; new runs appear in the table with step counts.</p>
     </div>
   {:else}
-    {#if filterText}
+    {#if filterText || configFilters.some((filter) => filter.key && filter.value != null)}
       <div class="filter-count-row">
         <span class="filter-count">{filteredRuns.length} of {runsData.length} runs</span>
       </div>

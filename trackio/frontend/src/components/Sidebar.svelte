@@ -9,7 +9,11 @@
   import { buildColorMap, getColorForIndex } from "../lib/stores.js";
   import { latestOnlySelection } from "../lib/selection.js";
   import { filterMetricsByRegex } from "../lib/dataProcessing.js";
-  import { computeGroupByOptions, computeGroupedRuns } from "../lib/grouping.js";
+  import {
+    computeGroupByOptions, computeGroupedRunEntries, computeConfigValueOptions,
+    buildGroupColorMap,
+    filterRunsByConfig,
+  } from "../lib/grouping.js";
   import {
     AUTO_PANELS_PER_ROW,
     PANELS_PER_ROW_CHOICES,
@@ -36,6 +40,9 @@
     showHeaders = $bindable(true),
     showComparer = $bindable(false),
     filterText = $bindable(""),
+    configFilters = $bindable([]),
+    groupByKeys = $bindable([]),
+    showGroupedMean = $bindable(true),
     runConfigs = {},
     metricColumns = [],
     spacesMode = false,
@@ -86,29 +93,39 @@
   }
 
   let filteredRuns = $derived.by(() => {
-    if (!filterText || !filterText.trim()) return runs;
-    const matches = new Set(filterMetricsByRegex(runs.map((r) => r.name), filterText));
-    return runs.filter((r) => matches.has(r.name));
+    const matches = filterText?.trim()
+      ? new Set(filterMetricsByRegex(runs.map((r) => r.name), filterText))
+      : null;
+    const named = matches ? runs.filter((r) => matches.has(r.name)) : runs;
+    return filterRunsByConfig(named, runConfigs, configFilters);
   });
 
   let runColorMap = $derived(buildColorMap(runs));
+  let groupColorMap = $derived(buildGroupColorMap(runs, runConfigs, groupByKeys));
   let filteredRunIds = $derived(filteredRuns.map((r) => r.id ?? r.name));
-
-  let groupByRaw = $state(null);
-
-  $effect(() => {
-    selectedProject;
-    groupByRaw = null;
-  });
+  let selectedRunSet = $derived(new Set(selectedRuns));
+  let selectedFilteredIds = $derived(filteredRunIds.filter((id) => selectedRunSet.has(id)));
 
   $effect(() => {
-    if (!groupByOptions.some((o) => o.value === groupByRaw)) {
-      groupByRaw = null;
+    const valid = new Set(groupByOptions.map((o) => o.value));
+    if (groupByKeys.some((key) => !valid.has(key))) {
+      groupByKeys = groupByKeys.filter((key) => valid.has(key));
+    }
+    if (configFilters.some((filter) => filter.key && !valid.has(filter.key))) {
+      configFilters = configFilters.filter((filter) => !filter.key || valid.has(filter.key));
     }
   });
 
   let groupByOptions = $derived(computeGroupByOptions(runConfigs));
-  let groupedRuns = $derived(computeGroupedRuns(filteredRuns, runConfigs, groupByRaw));
+  let groupedRuns = $derived(computeGroupedRunEntries(filteredRuns, runConfigs, groupByKeys));
+
+  function addConfigFilter() {
+    configFilters = [...configFilters, { key: "", value: null }];
+  }
+
+  function updateConfigFilter(index, key, value) {
+    configFilters = configFilters.map((filter, i) => i === index ? { key, value } : filter);
+  }
 
   let latestOnly = $state(false);
   let shareTab = $state("share");
@@ -246,6 +263,40 @@
         </div>
       {/if}
 
+      {#if variant === "full" || currentPage === "runs"}
+        <div class="section config-filters">
+          <span class="section-label">Config filters</span>
+          {#each configFilters as filter, i}
+            <div class="config-filter-row">
+              <div class="config-filter-field">
+                <Dropdown
+                  label={`Config filter ${i + 1} field`}
+                  showLabel={false}
+                  placeholder="Choose field"
+                  value={filter.key || null}
+                  choices={groupByOptions.filter((option) => option.value !== null)}
+                  onSelect={(key) => updateConfigFilter(i, key, null)}
+                />
+              </div>
+              <div class="config-filter-field">
+                <Dropdown
+                  label={`Config filter ${i + 1} value`}
+                  showLabel={false}
+                  placeholder="Choose value"
+                  value={filter.value}
+                  choices={computeConfigValueOptions(runConfigs, filter.key, runs)}
+                  disabled={!filter.key}
+                  onSelect={(value) => updateConfigFilter(i, filter.key, value)}
+                />
+              </div>
+              <button type="button" class="remove-config-filter" aria-label={`Remove config filter ${i + 1}`}
+                onclick={() => { configFilters = configFilters.filter((_, index) => index !== i); }}>×</button>
+            </div>
+          {/each}
+          <button type="button" class="add-config-filter" onclick={addConfigFilter}>+ Add filter</button>
+        </div>
+      {/if}
+
       {#if variant === "full"}
         {#if currentPage === "metrics" && spacesMode}
           <div class="section">
@@ -347,13 +398,14 @@
               <input
                 type="checkbox"
                 class="select-all-cb"
-                checked={selectedRuns.length === filteredRunIds.length && filteredRunIds.length > 0}
-                use:setIndeterminate={selectedRuns.length > 0 && selectedRuns.length < filteredRunIds.length}
+                checked={selectedFilteredIds.length === filteredRunIds.length && filteredRunIds.length > 0}
+                use:setIndeterminate={selectedFilteredIds.length > 0 && selectedFilteredIds.length < filteredRunIds.length}
                 onchange={() => {
-                  if (selectedRuns.length === filteredRunIds.length) {
-                    selectedRuns = [];
+                  if (selectedFilteredIds.length === filteredRunIds.length) {
+                    const visible = new Set(filteredRunIds);
+                    selectedRuns = selectedRuns.filter((id) => !visible.has(id));
                   } else {
-                    selectedRuns = [...filteredRunIds];
+                    selectedRuns = [...new Set([...selectedRuns, ...filteredRunIds])];
                   }
                   latestOnly = false;
                 }}
@@ -377,16 +429,30 @@
           <div class="group-by-row">
             <Dropdown
               label="Group by"
-              choices={groupByOptions}
-              bind:value={groupByRaw}
-              filterable={false}
+              placeholder="Add a field..."
+              value={null}
+              choices={groupByOptions.filter((option) => option.value !== null && !groupByKeys.includes(option.value))}
+              clearOnSelect={true}
+              onSelect={(key) => {
+                if (key && !groupByKeys.includes(key)) groupByKeys = [...groupByKeys, key];
+              }}
             />
+            {#if groupByKeys.length}
+              <div class="group-key-list">
+                {#each groupByKeys as key}
+                  <span class="group-key-chip">{groupByOptions.find((option) => option.value === key)?.label ?? key}
+                    <button type="button" aria-label={`Remove group field ${key}`}
+                      onclick={() => { groupByKeys = groupByKeys.filter((item) => item !== key); }}>×</button>
+                  </span>
+                {/each}
+              </div>
+            {/if}
           </div>
           {#if groupedRuns}
             <div class="grouped-runs">
-              {#each [...groupedRuns.entries()] as [groupLabel, groupRunList]}
+              {#each [...groupedRuns.entries()] as [groupId, { label: groupLabel, runs: groupRunList }]}
                 {@const groupIds = groupRunList.map((r) => r.id ?? r.name)}
-                {@const groupSelected = groupIds.filter((id) => selectedRuns.includes(id))}
+                {@const groupSelected = groupIds.filter((id) => selectedRunSet.has(id))}
                 <div class="run-group-section">
                   <div class="run-group-header">
                     <label class="select-all-label">
@@ -397,14 +463,18 @@
                         use:setIndeterminate={groupSelected.length > 0 && groupSelected.length < groupIds.length}
                         onchange={() => {
                           if (groupSelected.length === groupIds.length) {
-                            selectedRuns = selectedRuns.filter((id) => !groupIds.includes(id));
+                            const ids = new Set(groupIds);
+                            selectedRuns = selectedRuns.filter((id) => !ids.has(id));
                           } else {
-                            const toAdd = groupIds.filter((id) => !selectedRuns.includes(id));
+                            const toAdd = groupIds.filter((id) => !selectedRunSet.has(id));
                             selectedRuns = [...selectedRuns, ...toAdd];
                           }
                           latestOnly = false;
                         }}
                       />
+                      {#if showGroupedMean}
+                        <span class="group-color-dot" style:background={groupColorMap[groupId] ?? "#999"} aria-hidden="true"></span>
+                      {/if}
                       <span class="run-group-label" title={groupLabel}>{groupLabel}</span>
                       <span class="run-group-count">({groupRunList.length})</span>
                     </label>
@@ -485,6 +555,10 @@
               bind:checked={showHeaders}
             />
             {#if currentPage === "metrics"}
+              <GradioCheckbox
+                label="Show grouped mean and run range"
+                bind:checked={showGroupedMean}
+              />
               <GradioCheckbox
                 label="Show run comparer"
                 bind:checked={showComparer}
@@ -872,6 +946,15 @@
   .group-by-row {
     margin-top: 8px;
   }
+  .config-filter-row, .group-key-list { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+  .config-filter-field { flex: 1; min-width: 0; }
+  .remove-config-filter, .group-key-chip button { border: 0; background: transparent; color: var(--body-text-color-subdued, #9ca3af); cursor: pointer; }
+  .remove-config-filter { width: 20px; height: 30px; flex-shrink: 0; font-size: 18px; }
+  .remove-config-filter:hover, .group-key-chip button:hover { color: var(--body-text-color, #1f2937); }
+  .add-config-filter { margin-top: 8px; padding: 5px 8px; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-md, 6px); background: var(--background-fill-primary, white); color: var(--body-text-color, #1f2937); font: inherit; font-size: 12px; cursor: pointer; }
+  .add-config-filter:hover { background: var(--background-fill-secondary, #f9fafb); }
+  .group-key-list { flex-wrap: wrap; }
+  .group-key-chip { background: var(--background-fill-secondary, #f3f4f6); border-radius: 4px; padding: 2px 5px; font-size: 12px; }
   .grouped-runs {
     margin-top: 8px;
     display: flex;
@@ -898,6 +981,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 160px;
+  }
+  .group-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
   .run-group-count {
     font-size: 11px;

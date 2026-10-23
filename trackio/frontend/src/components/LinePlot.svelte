@@ -9,6 +9,7 @@
     observeNearViewport,
   } from "../lib/chartLifecycle.js";
   import { escapeVegaField } from "../lib/vega.js";
+  import { downloadCsv } from "../lib/csv.js";
 
   let {
     data = [],
@@ -21,6 +22,8 @@
     dashLabel = "",
     yLabel = "",
     colorMap = {},
+    rangeBand = false,
+    csvExports = undefined,
     title = "",
     xLim = null,
     yExtent = undefined,
@@ -194,8 +197,24 @@
           },
         }
       : {};
+    const segmentEnc = rangeBand ? { detail: { field: "segment_key", type: "nominal" } } : {};
 
     const layers = [];
+
+    if (rangeBand) {
+      layers.push({
+        data: { name: "data_range", values: data.filter((row) => row.run_min != null && row.run_max != null) },
+        mark: { type: "area", clip: true, opacity: 0.18 },
+        encoding: {
+          x: xEnc,
+          y: { field: "run_min", type: "quantitative", ...(yExtent ? { scale: { domain: yExtent } } : {}) },
+          y2: { field: "run_max" },
+          ...segmentEnc,
+          ...colorEnc,
+        },
+        name: "run_range",
+      });
+    }
 
     const lineMark = (extra = {}) => ({
       type: "line",
@@ -224,6 +243,7 @@
       { field: xVegaField, type: "quantitative", title: x },
       { field: yVegaField, type: "quantitative", title: yTitle },
     );
+    if (rangeBand) tooltipEnc.push({ field: "n", type: "quantitative", title: "Runs" });
 
     const hoverParams = [{
       name: "hover",
@@ -251,13 +271,13 @@
       layers.push({
         data: { name: "data_original", values: originalData },
         mark: lineMark({ strokeWidth: 1, opacity: 0.3 }),
-        encoding: { x: xEnc, y: yEnc, ...colorEnc, ...dashEnc },
+        encoding: { x: xEnc, y: yEnc, ...colorEnc, ...dashEnc, ...segmentEnc },
         name: "original",
       });
       layers.push({
         data: { name: "data_smoothed", values: smoothedData },
         mark: lineMark(),
-        encoding: { x: xEnc, y: yEnc, ...colorEnc, ...dashEnc },
+        encoding: { x: xEnc, y: yEnc, ...colorEnc, ...dashEnc, ...segmentEnc },
         name: "plot",
       });
       layers.push(
@@ -267,7 +287,7 @@
       layers.push({
         data: { name: "data_plot", values: data },
         mark: lineMark(),
-        encoding: { x: xEnc, y: yEnc, ...colorEnc, ...dashEnc },
+        encoding: { x: xEnc, y: yEnc, ...colorEnc, ...dashEnc, ...segmentEnc },
         name: "plot",
       });
       layers.push(
@@ -321,7 +341,7 @@
     const xDomain = computeXDomain(originalData);
     const xKey = xDomain ? `${xDomain[0]},${xDomain[1]}` : "auto";
     const yKey = yExtent ? `${yExtent[0]},${yExtent[1]}` : "auto";
-    return `${y}\0${x}\0${colorSpecKey}\0${dashSpecKey}\0${title}\0${fullscreen}\0${!!onSelect}\0${xKey}\0${yKey}`;
+    return `${y}\0${x}\0${colorSpecKey}\0${dashSpecKey}\0${title}\0${fullscreen}\0${!!onSelect}\0${rangeBand}\0${xKey}\0${yKey}`;
   }
 
   function replaceDataset(v, name, newData) {
@@ -343,6 +363,9 @@
         replaceDataset(view, "data_smoothed", smoothedData);
       } else {
         replaceDataset(view, "data_plot", data);
+      }
+      if (rangeBand) {
+        replaceDataset(view, "data_range", data.filter((row) => row.run_min != null && row.run_max != null));
       }
 
       view.run();
@@ -427,6 +450,11 @@
   }
 
   function downloadCSV() {
+    if (csvExports?.length) {
+      const item = csvExports[0];
+      downloadCsv(item.rows, item.columns, item.filename);
+      return;
+    }
     if (!data || data.length === 0) return;
     const originals = data.filter((d) => d.data_type === "original" || !d.data_type);
     if (originals.length === 0) return;
@@ -452,6 +480,11 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  function downloadGroupCSV() {
+    const item = csvExports?.[1];
+    if (item) downloadCsv(item.rows, item.columns, item.filename);
   }
 
   async function downloadImage() {
@@ -623,8 +656,8 @@
       type="button"
       class="toolbar-btn"
       onclick={downloadCSV}
-      title="Download this plot’s data as a CSV file"
-      aria-label="Download this plot’s data as a CSV file"
+      title={csvExports?.length ? "Download raw runs CSV" : "Download this plot’s data as a CSV file"}
+      aria-label={csvExports?.length ? "Download raw runs CSV" : "Download this plot’s data as a CSV file"}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -633,6 +666,10 @@
         <line x1="16" y1="17" x2="8" y2="17"/>
       </svg>
     </button>
+    {#if csvExports?.length > 1}
+      <button type="button" class="toolbar-btn" onclick={downloadGroupCSV}
+        title="Download group summary CSV" aria-label="Download group summary CSV">Σ CSV</button>
+    {/if}
     <button
       type="button"
       class="toolbar-btn"
@@ -750,8 +787,8 @@
         type="button"
         class="toolbar-btn"
         onclick={downloadCSV}
-        title="Download this plot’s data as a CSV file"
-        aria-label="Download this plot’s data as a CSV file"
+        title={csvExports?.length ? "Download raw runs CSV" : "Download this plot’s data as a CSV file"}
+        aria-label={csvExports?.length ? "Download raw runs CSV" : "Download this plot’s data as a CSV file"}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -760,6 +797,10 @@
           <line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
       </button>
+      {#if csvExports?.length > 1}
+        <button type="button" class="toolbar-btn" onclick={downloadGroupCSV}
+          title="Download group summary CSV" aria-label="Download group summary CSV">Σ CSV</button>
+      {/if}
       <button
         type="button"
         class="toolbar-btn"

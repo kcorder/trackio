@@ -2,7 +2,14 @@ import { describe, expect, test } from "vitest";
 import {
   computeGroupByOptions,
   computeGroupedRuns,
+  computeGroupedRunEntries,
+  buildGroupColorMap,
+  computeConfigValueOptions,
+  filterRunsByConfig,
+  groupForRun,
+  valueToken,
 } from "./grouping.js";
+import { DEFAULT_COLORS } from "./stores.js";
 
 const none = { label: "None", value: null };
 const opt = (label, value) => ({ label, value: value ?? label });
@@ -44,12 +51,14 @@ describe("computeGroupByOptions", () => {
     expect(computeGroupByOptions(configs)).toEqual([none, opt("lr")]);
   });
 
-  test("excludes keys with object or array values", () => {
+  test("surfaces nested scalar keys but excludes object and array values", () => {
     const configs = {
       "run-a": { optimizer: { lr: 0.01 }, tags: ["a", "b"], seed: 42 },
       "run-b": { optimizer: { lr: 0.02 }, tags: ["c"], seed: 7 },
     };
-    expect(computeGroupByOptions(configs)).toEqual([none, opt("seed")]);
+    expect(computeGroupByOptions(configs)).toEqual([
+      none, opt("optimizer.lr", '@["optimizer","lr"]'), opt("seed"),
+    ]);
   });
 
   test("excludes keys where any run has an object value even if others are scalar", () => {
@@ -57,7 +66,10 @@ describe("computeGroupByOptions", () => {
       "run-a": { optimizer: "adam", seed: 42 },
       "run-b": { optimizer: { type: "adam", lr: 0.01 }, seed: 7 },
     };
-    expect(computeGroupByOptions(configs)).toEqual([none, opt("seed")]);
+    expect(computeGroupByOptions(configs)).toEqual([
+      none, opt("optimizer.lr", '@["optimizer","lr"]'),
+      opt("optimizer.type", '@["optimizer","type"]'), opt("seed"),
+    ]);
   });
 
   test("hides reserved underscore-prefixed keys", () => {
@@ -163,6 +175,47 @@ describe("computeGroupByOptions", () => {
   });
 });
 
+describe("config filtering and multi-field grouping", () => {
+  const runs = [
+    { id: "a", name: "same" }, { id: "b", name: "same" },
+    { id: "c", name: "other" },
+  ];
+  const configs = {
+    a: { args: { lr: 0.01, optimizer: "adam" }, seed: 1 },
+    b: { args: { lr: 0.01, optimizer: "sgd" }, seed: 1 },
+    c: { args: { lr: "0.01", optimizer: "adam" }, seed: 2 },
+  };
+  const lr = '@["args","lr"]';
+  const optimizer = '@["args","optimizer"]';
+
+  test("filters by nested values with AND and preserves numeric types", () => {
+    const filters = [
+      { key: lr, value: valueToken(0.01) },
+      { key: optimizer, value: valueToken("adam") },
+    ];
+    expect(filterRunsByConfig(runs, configs, filters)).toEqual([runs[0]]);
+    expect(filterRunsByConfig(runs, configs, [{ key: lr, value: valueToken("0.01") }])).toEqual([runs[2]]);
+    expect(computeConfigValueOptions(configs, lr)).toContainEqual({
+      label: '"0.01"', value: valueToken("0.01"),
+    });
+  });
+
+  test("offers unset as an explicit filter value", () => {
+    const options = computeConfigValueOptions({ a: { seed: 1 }, b: {} }, "seed");
+    expect(options).toContainEqual({ label: "(unset)", value: valueToken(undefined) });
+    const missingConfig = computeConfigValueOptions({ a: { seed: 1 } }, "seed", runs);
+    expect(missingConfig).toContainEqual({ label: "(unset)", value: valueToken(undefined) });
+  });
+
+  test("uses all selected fields and run IDs for group identity", () => {
+    const group = groupForRun(runs[0], configs, [lr, optimizer]);
+    expect(group.label).toBe("args.lr=0.01 | args.optimizer=adam");
+    expect(groupForRun(runs[1], configs, [lr, optimizer]).id).not.toBe(group.id);
+    const grouped = computeGroupedRunEntries(runs, configs, [lr, optimizer]);
+    expect(grouped.size).toBe(3);
+  });
+});
+
 describe("computeGroupedRuns", () => {
   const runs = [
     { id: "1", name: "run-a" },
@@ -232,5 +285,31 @@ describe("computeGroupedRuns", () => {
     expect([...groups.keys()]).toEqual(["team-a", "team-b"]);
     expect(groups.get("team-a").map((r) => r.name)).toEqual(["run-a", "run-c"]);
     expect(groups.get("team-b").map((r) => r.name)).toEqual(["run-b"]);
+  });
+});
+
+describe("buildGroupColorMap", () => {
+  test("gives each distinct group a stable palette color shared by the sidebar and plots", () => {
+    const runs = [
+      { id: "a", name: "a" }, { id: "b", name: "b" },
+      { id: "c", name: "c" }, { id: "d", name: "d" },
+    ];
+    const configs = {
+      a: { model: "rnn" }, b: { model: "cnn" },
+      c: { model: "rnn" }, d: { model: "transformer" },
+    };
+    const groups = computeGroupedRunEntries(runs, configs, ["model"]);
+    const colors = buildGroupColorMap(runs, configs, ["model"]);
+    expect([...groups.keys()].map((id) => colors[id])).toEqual(DEFAULT_COLORS.slice(0, 3));
+    expect(colors[groupForRun(runs[0], configs, ["model"]).id])
+      .toBe(colors[groupForRun(runs[2], configs, ["model"]).id]);
+    expect(colors[groupForRun(runs[3], configs, ["model"]).id]).toBe(DEFAULT_COLORS[2]);
+  });
+
+  test("cycles the existing palette when there are more groups than colors", () => {
+    const runs = Array.from({ length: DEFAULT_COLORS.length + 1 }, (_, i) => ({ id: String(i) }));
+    const configs = Object.fromEntries(runs.map((run) => [run.id, { model: run.id }]));
+    const colors = buildGroupColorMap(runs, configs, ["model"]);
+    expect(colors[groupForRun(runs.at(-1), configs, ["model"]).id]).toBe(DEFAULT_COLORS[0]);
   });
 });

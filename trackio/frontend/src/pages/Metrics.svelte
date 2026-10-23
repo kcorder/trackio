@@ -23,6 +23,8 @@
     logsHaveNewData,
   } from "../lib/dataProcessing.js";
   import { buildColorMap } from "../lib/stores.js";
+  import { buildGroupColorMap, buildRunGroups } from "../lib/grouping.js";
+  import { computeGroupedMetric, groupedCsvExports, buildRawGroupedRows } from "../lib/groupedMetrics.js";
   import { registerSnapshotProvider } from "../lib/viewState.js";
   import {
     AUTO_PANELS_PER_ROW,
@@ -35,6 +37,8 @@
     selectedRuns = [],
     allRuns = [],
     runConfigs = {},
+    groupByKeys = [],
+    showGroupedMean = true,
     smoothing = 10,
     panelsPerRow = AUTO_PANELS_PER_ROW,
     xAxis = "step",
@@ -68,6 +72,19 @@
   const MAX_BATCH_RUNS = 64;
 
   let colorMap = $derived(buildColorMap(allRuns));
+  let groupedMode = $derived(showGroupedMean && groupByKeys.length > 0);
+  let runGroups = $derived(buildRunGroups(selectedRuns, runConfigs, groupByKeys));
+  let groupCache = $derived.by(() => {
+    masterData;
+    selectedRuns;
+    runConfigs;
+    groupByKeys;
+    return new Map();
+  });
+  let plotColorMap = $derived.by(() => {
+    if (!groupedMode) return colorMap;
+    return buildGroupColorMap(allRuns, runConfigs, groupByKeys);
+  });
 
   let metricGroups = $derived.by(() => {
     let filtered = metricFilter
@@ -85,7 +102,31 @@
   );
 
   function getPlotResult(metric) {
-    return computeMetricPlotData(masterData, xColumn, metric, xLim);
+    if (!groupByKeys.length) return computeMetricPlotData(masterData, xColumn, metric, xLim);
+    let result = groupCache.get(metric);
+    if (!result) {
+      result = computeGroupedMetric(masterData, metric, xColumn, selectedRuns, runConfigs, groupByKeys, runGroups);
+      groupCache.set(metric, result);
+    }
+    const csvExports = groupedCsvExports(result, metric, xColumn,
+      () => buildRawGroupedRows(rawDataCache, metric, xAxis, selectedRuns, runConfigs, groupByKeys));
+    if (!groupedMode) {
+      return { ...computeMetricPlotData(masterData, xColumn, metric, xLim), csvExports };
+    }
+    const visible = xLim
+      ? result.rows.filter((row) => row[xColumn] >= xLim[0] && row[xColumn] <= xLim[1])
+      : result.rows;
+    let yMin = Infinity;
+    let yMax = -Infinity;
+    for (const row of visible) {
+      yMin = Math.min(yMin, row.run_min ?? row[metric]);
+      yMax = Math.max(yMax, row.run_max ?? row[metric]);
+    }
+    return {
+      data: visible,
+      yExtent: visible.length ? [yMin, yMax] : undefined,
+      csvExports,
+    };
   }
 
   let autoLayout = $derived(isAutoPanels(panelsPerRow));
@@ -490,11 +531,12 @@
                 {#if useBar}
                   <BarPlot
                     data={plotData}
+                    csvExports={plotResult.csvExports}
                     y={metric}
                     title={directTitle}
                     colorField="series_key"
                     colorDisplayField="run"
-                    {colorMap}
+                    colorMap={plotColorMap}
                     draggable={true}
                     ondragstart={(e) => handleDragStart(directKey, i, e)}
                     ondragover={(e) => handleDragOver(directKey, i, e)}
@@ -503,12 +545,14 @@
                 {:else}
                   <LinePlot
                     data={plotData}
+                    csvExports={plotResult.csvExports}
+                    rangeBand={groupedMode}
                     x={xColumn}
                     y={metric}
                     title={directTitle}
                     colorField="series_key"
                     colorDisplayField="run"
-                    {colorMap}
+                    colorMap={plotColorMap}
                     {xLim}
                     {yExtent}
                     onSelect={handlePlotSelect}
@@ -545,11 +589,12 @@
                     {#if useBar}
                       <BarPlot
                         data={plotData}
+                        csvExports={plotResult.csvExports}
                         y={metric}
                         title={subTitle}
                         colorField="series_key"
                         colorDisplayField="run"
-                        {colorMap}
+                        colorMap={plotColorMap}
                         draggable={true}
                         ondragstart={(e) => handleDragStart(subKey, i, e)}
                         ondragover={(e) => handleDragOver(subKey, i, e)}
@@ -558,12 +603,14 @@
                     {:else}
                       <LinePlot
                         data={plotData}
+                        csvExports={plotResult.csvExports}
+                        rangeBand={groupedMode}
                         x={xColumn}
                         y={metric}
                         title={subTitle}
                         colorField="series_key"
                         colorDisplayField="run"
-                        {colorMap}
+                        colorMap={plotColorMap}
                         {xLim}
                         {yExtent}
                         onSelect={handlePlotSelect}

@@ -41,6 +41,8 @@
     watchNarrowViewport,
   } from "./lib/viewport.js";
   import { reconcileSelectedRuns } from "./lib/selection.js";
+  import { filterRunsByConfig } from "./lib/grouping.js";
+  import { filterMetricsByRegex } from "./lib/dataProcessing.js";
   import {
     getPageFromPath,
     navigateTo,
@@ -98,6 +100,9 @@
   let showHeaders = $state(true);
   let showComparer = $state(false);
   let filterText = $state("");
+  let configFilters = $state([]);
+  let groupByKeys = $state([]);
+  let showGroupedMean = $state(true);
   let metricColumns = $state([]);
   let requestedUrlXAxis = $state(null);
   let urlXAxisApplied = $state(false);
@@ -175,8 +180,15 @@
     return axis === "step" || axis === "time" || metricColumns.includes(axis);
   }
 
+  let visibleRuns = $derived.by(() => {
+    const names = filterText?.trim()
+      ? new Set(filterMetricsByRegex(runs.map((run) => run.name), filterText))
+      : null;
+    const matching = names ? runs.filter((run) => names.has(run.name)) : runs;
+    return filterRunsByConfig(matching, runConfigs, configFilters);
+  });
   let selectedRunRecords = $derived(
-    runs.filter((run) => selectedRuns.includes(runKey(run))),
+    visibleRuns.filter((run) => selectedRuns.includes(runKey(run))),
   );
 
   function handleNavigate(page) {
@@ -267,6 +279,12 @@
       console.error("Failed to load runs:", e);
     }
   }
+
+  $effect(() => {
+    selectedProject;
+    configFilters = [];
+    groupByKeys = [];
+  });
 
   async function refreshAlerts() {
     if (!selectedProject) return;
@@ -625,6 +643,9 @@
       bind:showHeaders
       bind:showComparer
       bind:filterText
+      bind:configFilters
+      bind:groupByKeys
+      bind:showGroupedMean
       {metricColumns}
       {availableSystemDevices}
       bind:selectedSystemDevices
@@ -666,6 +687,8 @@
           selectedRuns={selectedRunRecords}
           allRuns={runs}
           {runConfigs}
+          {groupByKeys}
+          {showGroupedMean}
           {smoothing}
           {panelsPerRow}
           {xAxis}
@@ -709,6 +732,8 @@
           project={selectedProject}
           {runs}
           {filterText}
+          {runConfigs}
+          {configFilters}
           onRunsChanged={refreshRunsAndMutation}
           runMutationAllowed={mutationStatus.allowed}
         />

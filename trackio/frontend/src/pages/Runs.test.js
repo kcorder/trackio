@@ -3,6 +3,7 @@ import { mount, unmount, tick } from "svelte";
 import Runs from "./Runs.svelte";
 import RunsTestHarness from "./RunsTestHarness.svelte";
 import { deleteRun, getProjectSummary, getRunSummary, getRunArtifactCounts } from "../lib/api.js";
+import { valueToken } from "../lib/grouping.js";
 
 vi.mock("../lib/api.js", () => ({
   deleteRun: vi.fn(),
@@ -77,6 +78,19 @@ describe("bulk run deletion", () => {
     await vi.waitFor(() => expect(deleteRun).toHaveBeenCalledTimes(2));
     expect(confirm).toHaveBeenCalledExactlyOnceWith("Delete 2 selected runs? This cannot be undone.");
     expect(records).toEqual([{ id: "c", name: "control" }]);
+  });
+
+  it("filters duplicate run names by config value and scopes bulk actions", async () => {
+    component = mount(Runs, { target, props: {
+      project: "demo",
+      runConfigs: { a: { args: { lr: 0.01 } }, b: { args: { lr: 0.02 } } },
+      configFilters: [{ key: '@["args","lr"]', value: valueToken(0.01) }],
+    } });
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+    await click(selectAll());
+    await click(deleteButton());
+    await vi.waitFor(() => expect(deleteRun).toHaveBeenCalledOnce());
+    expect(deleteRun.mock.calls[0][1].id).toBe("a");
   });
 
   it("cancels without deleting or clearing selection", async () => {

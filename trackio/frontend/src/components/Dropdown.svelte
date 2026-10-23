@@ -8,6 +8,10 @@
     choices = [],
     filterable = true,
     showLabel = true,
+    placeholder = "Select...",
+    disabled = false,
+    onSelect,
+    clearOnSelect = false,
   } = $props();
 
   let filterInput;
@@ -53,6 +57,7 @@
   }
 
   function handleFocus() {
+    if (disabled) return;
     inputText = "";
     filteredIndices = normalizedChoices.map((_, i) => i);
     showOptions = true;
@@ -85,7 +90,11 @@
   function handleBlur() {
     const matchIdx = normalizedChoices.findIndex((c) => c.label === inputText);
     if (matchIdx >= 0) {
-      value = normalizedChoices[matchIdx].value;
+      const selected = normalizedChoices[matchIdx].value;
+      if (selected !== value) {
+        value = selected;
+        onSelect?.(selected);
+      }
     } else if (value !== null) {
       const currentIdx = normalizedChoices.findIndex((c) => c.value === value);
       inputText = currentIdx >= 0 ? normalizedChoices[currentIdx].label : "";
@@ -100,8 +109,10 @@
   function handleOptionSelected(index) {
     const idx = parseInt(index);
     if (isNaN(idx)) return;
-    value = normalizedChoices[idx].value;
-    inputText = normalizedChoices[idx].label;
+    const selected = normalizedChoices[idx].value;
+    value = clearOnSelect ? null : selected;
+    inputText = clearOnSelect ? "" : normalizedChoices[idx].label;
+    onSelect?.(selected);
     showOptions = false;
     activeIndex = null;
     filterInput?.blur();
@@ -164,7 +175,8 @@
           onblur={handleBlur}
           onfocus={handleFocus}
           readonly={!filterable}
-          placeholder={value === null ? "Select..." : ""}
+          {disabled}
+          placeholder={value === null ? placeholder : ""}
         />
         <div class="icon-wrap">
           <svg width="16" height="16" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -211,6 +223,7 @@
 <style>
   .dropdown-container {
     width: 100%;
+    min-width: 0;
     margin-bottom: 4px;
   }
   .label {
@@ -237,6 +250,10 @@
     border-color: var(--input-border-color-focus, #fdba74);
     box-shadow: 0 0 0 2px var(--primary-50, #fff7ed);
   }
+  .wrap:has(input:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
   .wrap-inner {
     display: flex;
     position: relative;
@@ -254,6 +271,7 @@
     border: none;
     background: inherit;
     width: 100%;
+    min-width: 0;
     color: var(--body-text-color, #1f2937);
     font-size: 13px;
     font-family: inherit;
