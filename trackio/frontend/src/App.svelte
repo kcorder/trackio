@@ -42,6 +42,7 @@
     watchNarrowViewport,
   } from "./lib/viewport.js";
   import { reconcileSelectedRuns } from "./lib/selection.js";
+  import { filterMetricsByRegex } from "./lib/dataProcessing.js";
   import {
     getPageFromPath,
     navigateTo,
@@ -117,6 +118,8 @@
     configFilters = fromUrl ? parseConfigFilters(configFilter) : [];
     filterText = fromUrl ? nameFilter ?? "" : "";
   });
+  let groupByKeys = $state([]);
+  let showGroupedMean = $state(true);
   let metricColumns = $state([]);
   let requestedUrlXAxis = $state(null);
   let urlXAxisApplied = $state(false);
@@ -293,6 +296,12 @@
       console.error("Failed to load runs:", e);
     }
   }
+
+  $effect(() => {
+    selectedProject;
+    configFilters = [];
+    groupByKeys = [];
+  });
 
   async function refreshAlerts() {
     if (!selectedProject) return;
@@ -656,6 +665,9 @@
       bind:showComparer
       bind:configFilters
       bind:filterText
+      bind:configFilters
+      bind:groupByKeys
+      bind:showGroupedMean
       {metricColumns}
       {availableSystemDevices}
       bind:selectedSystemDevices
@@ -697,6 +709,8 @@
           selectedRuns={selectedRunRecords}
           allRuns={runs}
           {runConfigs}
+          {groupByKeys}
+          {showGroupedMean}
           {smoothing}
           {panelsPerRow}
           {xAxis}

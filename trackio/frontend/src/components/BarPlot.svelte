@@ -3,6 +3,7 @@
   import embed from "vega-embed";
   import { buildBarLabelLayout, settleBarLabels } from "../lib/barAxis.js";
   import { buildColorSpecKey } from "../lib/dataProcessing.js";
+  import { downloadCsv } from "../lib/csv.js";
   import {
     createVegaViewManager,
     observeNearViewport,
@@ -14,6 +15,7 @@
     colorField = "run",
     colorDisplayField = "",
     colorMap = {},
+    csvExports = undefined,
     title = "",
     draggable = false,
     ondragstart = null,
@@ -72,6 +74,9 @@
           key,
           label: d[colorDisplayField] || key,
           value: d[y],
+          run_min: d.run_min,
+          run_max: d.run_max,
+          n: d.n,
         });
       }
     }
@@ -97,6 +102,34 @@
 
     const yTitle = y.includes("/") ? y.split("/").pop() : y;
 
+    const encoding = {
+      x: {
+        field: "key",
+        type: "nominal",
+        sort: keys,
+        axis: labelLayout.axis,
+        title: null,
+      },
+      y: {
+        field: "value",
+        type: "quantitative",
+        title: yTitle,
+        scale: { zero: true },
+      },
+      color: {
+        field: "key",
+        type: "nominal",
+        scale: { domain: keys, range: colorRange },
+        legend: null,
+      },
+      tooltip: [
+        { field: "label", type: "nominal", title: "Run" },
+        { field: "value", type: "quantitative", title: yTitle },
+      ],
+    };
+    const barMark = { type: "bar", cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 };
+    const hasRange = barData.some((item) => item.run_min != null);
+
     return {
       $schema: "https://vega.github.io/schema/vega-lite/v5.json",
       width: "container",
@@ -104,36 +137,21 @@
       autosize: { type: "fit", contains: "padding" },
       params: labelLayout.params,
       data: { values: barData },
-      mark: {
-        type: "bar",
-        cornerRadiusTopLeft: 3,
-        cornerRadiusTopRight: 3,
-      },
-      encoding: {
-        x: {
-          field: "key",
-          type: "nominal",
-          sort: keys,
-          axis: labelLayout.axis,
-          title: null,
-        },
-        y: {
-          field: "value",
-          type: "quantitative",
-          title: yTitle,
-          scale: { zero: true },
-        },
-        color: {
-          field: "key",
-          type: "nominal",
-          scale: { domain: keys, range: colorRange },
-          legend: null,
-        },
-        tooltip: [
-          { field: "label", type: "nominal", title: "Run" },
-          { field: "value", type: "quantitative", title: yTitle },
+      ...(hasRange ? {
+        layer: [
+          { mark: barMark, encoding },
+          {
+            transform: [{ filter: "datum.run_min != null" }],
+            mark: { type: "rule", strokeWidth: 2 },
+            encoding: {
+              x: encoding.x,
+              y: { field: "run_min", type: "quantitative" },
+              y2: { field: "run_max" },
+              color: encoding.color,
+            },
+          },
         ],
-      },
+      } : { mark: barMark, encoding }),
       config: {
         background: "transparent",
         axis: {
@@ -192,6 +210,11 @@
   }
 
   function downloadCSV() {
+    if (csvExports?.length) {
+      const item = csvExports[0];
+      downloadCsv(item.rows, item.columns, item.filename);
+      return;
+    }
     const barData = getBarData();
     if (barData.length === 0) return;
     const yHeader = /[,"]/.test(y) ? `"${y.replace(/"/g, '""')}"` : y;
@@ -213,6 +236,11 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  function downloadGroupCSV() {
+    const item = csvExports?.[1];
+    if (item) downloadCsv(item.rows, item.columns, item.filename);
   }
 
   async function downloadImage() {
@@ -380,8 +408,8 @@
       type="button"
       class="toolbar-btn"
       onclick={downloadCSV}
-      title="Download this plot's data as a CSV file"
-      aria-label="Download this plot's data as a CSV file"
+      title={csvExports?.length ? "Download raw runs CSV" : "Download this plot's data as a CSV file"}
+      aria-label={csvExports?.length ? "Download raw runs CSV" : "Download this plot's data as a CSV file"}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -390,6 +418,10 @@
         <line x1="16" y1="17" x2="8" y2="17"/>
       </svg>
     </button>
+    {#if csvExports?.length > 1}
+      <button type="button" class="toolbar-btn" onclick={downloadGroupCSV}
+        title="Download group summary CSV" aria-label="Download group summary CSV">Σ CSV</button>
+    {/if}
     <button
       type="button"
       class="toolbar-btn"
@@ -469,8 +501,8 @@
         type="button"
         class="toolbar-btn"
         onclick={downloadCSV}
-        title="Download this plot's data as a CSV file"
-        aria-label="Download this plot's data as a CSV file"
+        title={csvExports?.length ? "Download raw runs CSV" : "Download this plot's data as a CSV file"}
+        aria-label={csvExports?.length ? "Download raw runs CSV" : "Download this plot's data as a CSV file"}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
@@ -479,6 +511,10 @@
           <line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
       </button>
+      {#if csvExports?.length > 1}
+        <button type="button" class="toolbar-btn" onclick={downloadGroupCSV}
+          title="Download group summary CSV" aria-label="Download group summary CSV">Σ CSV</button>
+      {/if}
       <button
         type="button"
         class="toolbar-btn"
