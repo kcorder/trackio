@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { createPollingTask } from "./hostPolling.js";
+import { createPollingTask, effectiveMetricRefreshInterval } from "./hostPolling.js";
+
+describe("effectiveMetricRefreshInterval", () => {
+  test("uses a slower default when many runs are selected", () => {
+    expect(effectiveMetricRefreshInterval("auto", 19)).toBe(5000);
+    expect(effectiveMetricRefreshInterval("auto", 20)).toBe(15000);
+  });
+
+  test("honors manual and explicit refresh settings", () => {
+    expect(effectiveMetricRefreshInterval(0, 70)).toBe(0);
+    expect(effectiveMetricRefreshInterval(30000, 70)).toBe(30000);
+    expect(effectiveMetricRefreshInterval("invalid", 70)).toBe(5000);
+  });
+});
 
 function deferred() {
   let resolve;

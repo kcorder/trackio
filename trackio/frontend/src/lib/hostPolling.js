@@ -24,6 +24,12 @@ export function getMetricsPollIntervalMs() {
   return isHfSpaceHost() ? 3500 : 1000;
 }
 
+export function effectiveMetricRefreshInterval(setting, selectedRunCount) {
+  if (setting === "auto") return selectedRunCount >= 20 ? 15000 : 5000;
+  const interval = Number(setting);
+  return [0, 5000, 15000, 30000].includes(interval) ? interval : 5000;
+}
+
 export function isTabHidden() {
   return typeof document !== "undefined" && document.hidden;
 }

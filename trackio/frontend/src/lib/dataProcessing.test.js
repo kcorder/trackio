@@ -3,7 +3,49 @@ import {
   computeMetricPlotData,
   downsample,
   processRunData,
+  summarizeMetricRows,
 } from "./dataProcessing.js";
+
+describe("summarizeMetricRows", () => {
+  test("finds metrics and single-point plots in one pass over sparse rows", () => {
+    const rows = [
+      { step: 0, series_key: "a", loss: 1, accuracy: 0.5 },
+      { step: 1, series_key: "a", loss: 0.8 },
+      { step: 0, series_key: "b", loss: 0.7, accuracy: 0.6 },
+    ];
+    const result = summarizeMetricRows(rows, "step");
+    expect(result.metrics).toEqual(["loss", "accuracy"]);
+    expect(result.singlePointMetrics).toEqual(new Set(["accuracy"]));
+  });
+});
+
+describe("dense plot sampling", () => {
+  test("bounds plotted points across many runs without changing source rows", () => {
+    const rows = Array.from({ length: 70 }, (_, run) =>
+      Array.from({ length: 3000 }, (_, step) => ({
+        step,
+        loss: Math.sin(step / 100),
+        series_key: `run-${run}`,
+        data_type: "original",
+      })),
+    ).flat();
+    const plot = computeMetricPlotData(rows, "step", "loss", null);
+    expect(rows).toHaveLength(210000);
+    expect(plot.data.length).toBeLessThanOrEqual(5000);
+    expect(new Set(plot.data.map((row) => row.series_key)).size).toBe(70);
+  });
+
+  test("keeps only the extremes when thousands of values share one x position", () => {
+    const rows = Array.from({ length: 3000 }, (_, index) => ({
+      step: 0,
+      loss: index / 3000,
+      series_key: "run-a",
+    }));
+    const plot = computeMetricPlotData(rows, "step", "loss", null);
+    expect(plot.data).toHaveLength(2);
+    expect(plot.data.map((row) => row.loss)).toEqual([0, 2999 / 3000]);
+  });
+});
 
 describe("processRunData smoothing", () => {
   test("does not fabricate values for rows that did not log the metric", () => {
