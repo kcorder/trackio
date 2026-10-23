@@ -3,6 +3,7 @@
   import embed from "vega-embed";
   import { buildColorSpecKey } from "../lib/dataProcessing.js";
   import { downloadCsv } from "../lib/csv.js";
+  import { downloadChartImage } from "../lib/chartImage.js";
   import {
     createVegaViewManager,
     observeNearViewport,
@@ -243,16 +244,20 @@
   }
 
   async function downloadImage() {
-    const view = viewManager.current;
-    if (!view) return;
     try {
-      const url = await view.toImageURL("png", 4);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${(y || "chart").replace(/\//g, "_")}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      await render();
+      const view = viewManager.current;
+      if (!view) return;
+      const entries = getBarData().map((row) => ({
+        name: row.label,
+        color: colorMap[row.key] || "#999",
+      }));
+      await downloadChartImage({
+        view,
+        filename: `${(y || "chart").replace(/\//g, "_")}.png`,
+        title,
+        legendEntries: entries,
+      });
     } catch (e) {
       console.error("Failed to export image:", e);
     }

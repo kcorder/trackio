@@ -10,6 +10,7 @@
   } from "../lib/chartLifecycle.js";
   import { escapeVegaField } from "../lib/vega.js";
   import { downloadCsv } from "../lib/csv.js";
+  import { downloadChartImage } from "../lib/chartImage.js";
 
   let {
     data = [],
@@ -488,16 +489,18 @@
   }
 
   async function downloadImage() {
-    const view = viewManager.current;
-    if (!view) return;
     try {
-      const url = await view.toImageURL("png", 4);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${(y || "chart").replace(/\//g, "_")}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      await render();
+      const view = viewManager.current;
+      if (!view) return;
+      await downloadChartImage({
+        view,
+        filename: `${(y || "chart").replace(/\//g, "_")}.png`,
+        title,
+        legendEntries,
+        dashLegendEntries,
+        rangeBand,
+      });
     } catch (e) {
       console.error("Failed to export image:", e);
     }
