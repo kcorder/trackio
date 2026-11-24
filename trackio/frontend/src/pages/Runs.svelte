@@ -38,7 +38,7 @@
   let configError = $state("");
   let configSaving = $state(false);
   let configRevisions = $state({});
-  let configOptions = $derived(configFilterKeys(runConfigs));
+  let configOptions = $derived(configFilterKeys(runConfigs, { includeAliases: true }));
   function cellValue(run, key) {
     let value = runConfigs[run.id] ?? runConfigs[run.name];
     for (const part of JSON.parse(key)) value = value?.[part];
@@ -94,7 +94,7 @@
   let renameValue = $state("");
   let renameInput = $state(null);
 
-  let configMatch = $derived(compileConfigFilter(configFilters));
+  let configMatch = $derived(compileConfigFilter(configFilters, runConfigs));
   let configRuns = $derived(filterRunsByConfig(runsData, runConfigs, configMatch));
   let filteredRuns = $derived.by(() => {
     if (!filterText || !filterText.trim()) return configRuns;

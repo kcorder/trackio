@@ -202,7 +202,7 @@
     return axis === "step" || axis === "time" || metricColumns.includes(axis);
   }
 
-  let configMatch = $derived(compileConfigFilter(configFilters));
+  let configMatch = $derived(compileConfigFilter(configFilters, runConfigs));
   let selectedRunIds = $derived(new Set(selectedRuns));
   let selectedRunRecords = $derived(
     filterRunsByConfig(

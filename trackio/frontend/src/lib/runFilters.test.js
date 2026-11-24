@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { configFilterKeys, compileConfigFilter, filterRunsByConfig, filterRunsByName, parseConfigFilters } from "./runFilters.js";
+import { configFilterKeys, configValueChoices, compileConfigFilter, filterRunsByConfig, filterRunsByName, parseConfigFilters } from "./runFilters.js";
 const rule = (key, value, operator = "=") => ({ key: JSON.stringify(key), value, operator });
 it("matches OR groups of AND conditions by ID despite duplicate names", () => {
   const runs = Array.from({ length: 4 }, (_, id) => ({ id, name: "same" }));
@@ -58,4 +58,30 @@ it("matches typed IN members without coercion, including null and missing values
   for (const x of ["1",false,2]) expect(match({x})).toBe(false);
   expect(match({})).toBe(false);
   expect(compileConfigFilter([[{key:'["x"]', operator:"IN", value:"[]"}]])({x:1})).toBe(false);
+});
+
+it("unifies filter fields, values and matching across flat and nested configs", () => {
+  const configs = {
+    a: {"env_args.compile_transition": true},
+    b: {env_args: {compile_transition: false}},
+    c: {env_args: {compile_transition: true}, "env_args.compile_transition": true},
+    d: {},
+  };
+  const key = JSON.stringify(["env_args", "compile_transition"]);
+  expect(configFilterKeys(configs)).toEqual([{value:key,label:"env_args.compile_transition"}]);
+  expect(configValueChoices(configs, key).map((choice) => choice.token)).toEqual(["false", "true"]);
+  const runs = Object.keys(configs).map((id) => ({id, name:id}));
+  for (const [operator, value] of [["=", "true"], ["IN", "[true]"]]) {
+    const match = compileConfigFilter([[{key,operator,value}]], configs);
+    expect(filterRunsByConfig(runs, configs, match).map((run) => run.id)).toEqual(["a", "c"]);
+  }
+  expect(configFilterKeys(configs, {includeAliases:true})).toHaveLength(2);
+});
+
+it("retains conflicting literal dotted filter fields and never falls back to them", () => {
+  const configs = {a:{env_args:{seed:1},"env_args.seed":"1"}, b:{"env_args.seed":1}};
+  expect(configFilterKeys(configs)).toHaveLength(2);
+  const match = compileConfigFilter([[rule(["env_args", "seed"], "[1]", "IN")]], configs);
+  expect(match(configs.a)).toBe(true);
+  expect(match(configs.b)).toBe(false);
 });

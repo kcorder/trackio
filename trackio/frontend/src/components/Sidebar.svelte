@@ -123,7 +123,7 @@
   }
 
   let hasRunFilter = $derived(Boolean(filterText.trim()) || configFilters.some((group) => group.some((rule) => rule.key)));
-  let configMatch = $derived(compileConfigFilter(configFilters));
+  let configMatch = $derived(compileConfigFilter(configFilters, runConfigs));
   let configRuns = $derived(filterRunsByConfig(runs, runConfigs, configMatch));
   let filteredRuns = $derived(filterRunsByName(configRuns, filterText));
 

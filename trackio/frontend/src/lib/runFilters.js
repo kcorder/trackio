@@ -1,5 +1,27 @@
 import { filterMetricsByRegex } from "./dataProcessing.js";
 
+export function configPathValue(config, path) {
+  let value = config;
+  for (const key of path) {
+    if (value == null || !Object.hasOwn(value, key)) return undefined;
+    value = value[key];
+  }
+  return value;
+}
+
+export function compatibleConfigAlias(configs, path) {
+  if (path.length < 2) return null;
+  const flat = path.join(".");
+  const values = Object.values(configs ?? {});
+  return values.some((config) => configPathValue(config, [flat]) !== undefined)
+    && values.every((config) => {
+      const nested = configPathValue(config, path);
+      const literal = configPathValue(config, [flat]);
+      return (nested === undefined || literal === undefined || Object.is(nested, literal))
+        && [nested, literal].every((value) => value == null || typeof value !== "object");
+    }) ? flat : null;
+}
+
 export function configKeyLabel(key) {
   return JSON.parse(key).map((part, i) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(part)
     ? `${i ? "." : ""}${part}` : `[${JSON.stringify(part)}]`).join("");
@@ -26,7 +48,7 @@ export function filterRunsByName(runs, pattern) {
   return runs.filter((run) => names.has(run.name));
 }
 
-export function configFilterKeys(configs) {
+export function configFilterKeys(configs, { includeAliases = false } = {}) {
   const keys = new Set();
   function visit(value, path = []) {
     for (const [key, child] of Object.entries(value ?? {})) {
@@ -40,21 +62,26 @@ export function configFilterKeys(configs) {
     }
   }
   for (const config of Object.values(configs)) visit(config);
+  if (!includeAliases) {
+    for (const key of keys) {
+      const alias = compatibleConfigAlias(configs, JSON.parse(key));
+      if (alias !== null) keys.delete(JSON.stringify([alias]));
+    }
+  }
   return [...keys].map((value) => ({ value, label: configKeyLabel(value) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export function compileConfigFilter(groups) {
+export function compileConfigFilter(groups, configs = {}) {
   const compiled = groups.map((group) => group.filter((rule) => rule.key).map((rule) => {
     const path = JSON.parse(rule.key);
+    const alias = compatibleConfigAlias(configs, path);
     const expected = rule.value.trim();
     const members = rule.operator === "IN" ? parseMembership(rule.value) : [];
     return (config) => {
-      let actual = config;
-      for (const key of path) {
-        if (actual == null || !Object.hasOwn(actual, key)) return false;
-        actual = actual[key];
-      }
+      let actual = configPathValue(config, path);
+      if (actual === undefined && alias !== null) actual = configPathValue(config, [alias]);
+      if (actual === undefined) return false;
       if (actual !== null && typeof actual === "object") return false;
       const equal = typeof actual === "number"
         ? expected !== "" && actual === Number(expected)
@@ -92,12 +119,11 @@ export function parseMembership(value) {
 export function configValueChoices(configs, key) {
   if (!key) return [];
   const path = JSON.parse(key);
+  const alias = compatibleConfigAlias(configs, path);
   const values = new Map();
   for (const config of Object.values(configs)) {
-    let value = config;
-    for (const part of path) {
-      value = value != null && Object.hasOwn(value, part) ? value[part] : undefined;
-    }
+    let value = configPathValue(config, path);
+    if (value === undefined && alias !== null) value = configPathValue(config, [alias]);
     if (value === undefined || (value !== null && typeof value === "object")) continue;
     const token = JSON.stringify(value);
     values.set(token, { token, label: token });

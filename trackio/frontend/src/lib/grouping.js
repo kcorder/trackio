@@ -1,4 +1,4 @@
-import { configKeyLabel } from "./runFilters.js";
+import { configKeyLabel, configPathValue, compatibleConfigAlias } from "./runFilters.js";
 import { buildColorMap } from "./stores.js";
 
 export const PROMOTED_RESERVED_KEYS = Object.freeze({
@@ -34,28 +34,15 @@ export function configPathLabel(key) {
 }
 
 function getConfigValue(config, key) {
-  let value = config;
-  for (const part of pathForKey(key)) {
-    if (!value || typeof value !== "object" || !Object.hasOwn(value, part)) return undefined;
-    value = value[part];
-  }
-  return value;
+  return configPathValue(config, pathForKey(key));
 }
 
 function compatibleAliases(runConfigs, keys) {
   const aliases = new Map();
   for (const key of keys) {
     const path = pathForKey(key);
-    if (path.length < 2) continue;
-    const flat = path.join(".");
-    const configs = Object.values(runConfigs ?? {});
-    if (configs.some((config) => getConfigValue(config, flat) !== undefined)
-      && configs.every((config) => {
-        const nested = getConfigValue(config, key);
-        const literal = getConfigValue(config, flat);
-        return (nested === undefined || literal === undefined || Object.is(nested, literal))
-          && [nested, literal].every((value) => value == null || typeof value !== "object");
-      })) {
+    const flat = compatibleConfigAlias(runConfigs, path);
+    if (flat !== null) {
       aliases.set(key, flat);
       aliases.set(flat, key);
     }

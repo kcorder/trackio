@@ -94,3 +94,26 @@ it("does not rediscover keys on polls after Apply, Cancel, or Escape", async () 
     target.remove();
   }
 });
+
+it("offers one nested field for matching flattened aliases in the dialog", async () => {
+  const target = document.createElement("div");
+  document.body.appendChild(target);
+  const component = mount(ConfigFilters, {target, props:{configs:{
+    old:{"env_args.compile_transition":true},
+    modern:{env_args:{compile_transition:false}},
+  }}});
+  try {
+    await tick();
+    target.querySelector("dialog").showModal = () => {};
+    target.querySelector("button").click();
+    await tick();
+    [...target.querySelectorAll("button")].find((button) => button.textContent === "+ Add filter").click();
+    await tick();
+    const options = [...target.querySelector('[aria-label="Configuration key"]').options];
+    expect(options.map((option) => option.textContent)).toEqual(["Select config key", "env_args.compile_transition"]);
+    expect(options[1].value).toBe('["env_args","compile_transition"]');
+  } finally {
+    await unmount(component);
+    target.remove();
+  }
+});
