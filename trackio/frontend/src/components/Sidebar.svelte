@@ -933,12 +933,11 @@
   .group-by-row {
     margin-top: 8px;
   }
-  .group-key-list { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+  .group-key-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
   .group-key-chip button { border: 0; background: transparent; color: var(--body-text-color-subdued, #9ca3af); cursor: pointer; }
   .group-key-chip button:hover { color: var(--body-text-color, #1f2937); }
   .sync-metrics-btn { padding: 6px 10px; border: 1px solid var(--border-color-primary, #e5e7eb); border-radius: var(--radius-md, 6px); background: var(--background-fill-primary, white); color: var(--body-text-color, #1f2937); font: inherit; cursor: pointer; }
   .sync-metrics-btn:hover { background: var(--background-fill-secondary, #f9fafb); }
-  .group-key-list { flex-wrap: wrap; }
   .group-key-chip { background: var(--background-fill-secondary, #f3f4f6); border-radius: 4px; padding: 2px 5px; font-size: 12px; }
   .grouped-runs {
     margin-top: 8px;

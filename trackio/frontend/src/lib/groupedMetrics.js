@@ -42,7 +42,6 @@ function sharedGrid(groupRuns, maxGridPoints = MAX_GRID_POINTS) {
   const last = allX[allX.length - 1];
   const step = (last - first) / (maxGridPoints - 1);
   const grid = Array.from({ length: maxGridPoints }, (_, i) => i === maxGridPoints - 1 ? last : first + i * step);
-  // Preserve each run's endpoints, including singleton runs, even on a capped grid.
   for (const { points } of groupRuns) {
     grid.push(points[0].x, points[points.length - 1].x);
   }

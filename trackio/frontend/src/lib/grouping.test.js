@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   computeGroupByOptions,
+  configPathLabel,
   computeGroupedRuns,
   computeGroupedRunEntries,
   buildGroupColorMap,
@@ -289,4 +290,9 @@ describe("buildGroupColorMap", () => {
     const colors = buildGroupColorMap(runs, configs, ["model"]);
     expect(colors[groupForRun(runs.at(-1), configs, ["model"]).id]).toBe(DEFAULT_COLORS[0]);
   });
+});
+
+test("distinguishes nested config paths from literal dotted keys in grouping labels", () => {
+  expect(configPathLabel('@["args","lr"]')).toBe("args.lr");
+  expect(configPathLabel("args.lr")).toBe('["args.lr"]');
 });

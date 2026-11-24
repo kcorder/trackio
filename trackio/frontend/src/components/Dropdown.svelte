@@ -9,7 +9,6 @@
     filterable = true,
     showLabel = true,
     placeholder = "Select...",
-    disabled = false,
     onSelect,
     clearOnSelect = false,
   } = $props();
@@ -57,7 +56,6 @@
   }
 
   function handleFocus() {
-    if (disabled) return;
     inputText = "";
     filteredIndices = normalizedChoices.map((_, i) => i);
     showOptions = true;
@@ -87,13 +85,18 @@
     }
   }
 
+  function selectChoice(index) {
+    const choice = normalizedChoices[index];
+    value = clearOnSelect ? null : choice.value;
+    inputText = clearOnSelect ? "" : choice.label;
+    onSelect?.(choice.value);
+  }
+
   function handleBlur() {
     const matchIdx = normalizedChoices.findIndex((c) => c.label === inputText);
     if (matchIdx >= 0) {
-      const selected = normalizedChoices[matchIdx].value;
-      if (selected !== value) {
-        value = selected;
-        onSelect?.(selected);
+      if (showOptions && (clearOnSelect || normalizedChoices[matchIdx].value !== value)) {
+        selectChoice(matchIdx);
       }
     } else if (value !== null) {
       const currentIdx = normalizedChoices.findIndex((c) => c.value === value);
@@ -109,10 +112,7 @@
   function handleOptionSelected(index) {
     const idx = parseInt(index);
     if (isNaN(idx)) return;
-    const selected = normalizedChoices[idx].value;
-    value = clearOnSelect ? null : selected;
-    inputText = clearOnSelect ? "" : normalizedChoices[idx].label;
-    onSelect?.(selected);
+    selectChoice(idx);
     showOptions = false;
     activeIndex = null;
     filterInput?.blur();
@@ -175,7 +175,6 @@
           onblur={handleBlur}
           onfocus={handleFocus}
           readonly={!filterable}
-          {disabled}
           placeholder={value === null ? placeholder : ""}
         />
         <div class="icon-wrap">
@@ -249,10 +248,6 @@
   .wrap.focused {
     border-color: var(--input-border-color-focus, #fdba74);
     box-shadow: 0 0 0 2px var(--primary-50, #fff7ed);
-  }
-  .wrap:has(input:disabled) {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
   .wrap-inner {
     display: flex;

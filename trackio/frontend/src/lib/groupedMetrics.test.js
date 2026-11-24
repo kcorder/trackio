@@ -136,3 +136,15 @@ test("upstream OR and AND filters constrain grouped aggregates and exports by ru
   const [, summary] = groupedCsvExports(result, "loss", "step", []);
   expect(summary.rows.find((row) => row.group === "small")).toMatchObject({ mean: 3, n: 2 });
 });
+
+test("keeps literal dotted and nested grouping fields distinct in CSV exports", () => {
+  const runs = [{ id: "a", name: "run" }];
+  const configs = { a: { "args.lr": 1, args: { lr: 2 } } };
+  const result = computeGroupedMetric(
+    [{ run_id: "a", step: 1, loss: 3 }],
+    "loss", "step", runs, configs, ["args.lr", '@["args","lr"]'],
+  );
+  const [, summary] = groupedCsvExports(result, "loss", "step", []);
+  expect(summary.rows[0]).toMatchObject({ 'config.["args.lr"]': 1, "config.args.lr": 2 });
+  expect(new Set(summary.columns).size).toBe(summary.columns.length);
+});

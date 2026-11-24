@@ -1,3 +1,4 @@
+import { configKeyLabel } from "./runFilters.js";
 import { buildColorMap } from "./stores.js";
 
 export const PROMOTED_RESERVED_KEYS = Object.freeze({
@@ -14,7 +15,7 @@ function displayLabelForKey(key) {
 }
 
 const NESTED_PREFIX = "@";
-export const UNSET_VALUE = "__trackio_unset__";
+const UNSET_VALUE = "__trackio_unset__";
 
 function pathForKey(key) {
   if (key.startsWith(`${NESTED_PREFIX}[`)) {
@@ -22,17 +23,17 @@ function pathForKey(key) {
       const path = JSON.parse(key.slice(1));
       if (Array.isArray(path) && path.every((part) => typeof part === "string")) return path;
     } catch {
-      // A literal config key may happen to begin with "@[".
+      return [key];
     }
   }
   return [key];
 }
 
 export function configPathLabel(key) {
-  return pathForKey(key).map(displayLabelForKey).join(".");
+  return configKeyLabel(JSON.stringify(pathForKey(key).map(displayLabelForKey)));
 }
 
-export function getConfigValue(config, key) {
+function getConfigValue(config, key) {
   let value = config;
   for (const part of pathForKey(key)) {
     if (!value || typeof value !== "object" || !Object.hasOwn(value, part)) return undefined;
@@ -41,16 +42,16 @@ export function getConfigValue(config, key) {
   return value;
 }
 
-export function configForRun(run, runConfigs) {
+function configForRun(run, runConfigs) {
   return (runConfigs ?? {})[run.id] ?? (runConfigs ?? {})[run.name] ?? {};
 }
 
-export function valueToken(value) {
+function valueToken(value) {
   if (value == null) return UNSET_VALUE;
   return JSON.stringify([typeof value, value]);
 }
 
-export function valueLabel(value) {
+function valueLabel(value) {
   if (value == null) return "(unset)";
   if (typeof value === "string" && (
     value === "" || value === "(unset)" || value === "true" || value === "false"
