@@ -18,7 +18,7 @@ export function wrapImageText(value, maxWidth, measure) {
   return lines;
 }
 
-export function layoutImageLegend(entries, dashEntries, width, measure, rangeBand = false) {
+export function layoutImageLegend(entries, dashEntries, width, measure, rangeBand = false, bandMethod = "range") {
   const textWidth = Math.max(40, width - PADDING * 2 - 22);
   const rows = [
     ...entries.map((entry) => ({
@@ -36,7 +36,7 @@ export function layoutImageLegend(entries, dashEntries, width, measure, rangeBan
     rows.push({
       kind: "band",
       color: entries[0].color,
-      lines: wrapImageText("Shaded band: observed run range", textWidth, measure),
+      lines: wrapImageText(bandMethod === "std" ? "Band: mean ±1 population SD" : "Band: observed run range", textWidth, measure),
     });
   }
   return rows.map((row) => ({ ...row, height: Math.max(22, row.lines.length * LINE_HEIGHT + 6) }));
@@ -71,6 +71,7 @@ export async function downloadChartImage({
   legendEntries = [],
   dashLegendEntries = [],
   rangeBand = false,
+  bandMethod = "range",
 }) {
   if (view.runAsync) await view.runAsync();
   const chart = await loadImage(await view.toImageURL("png", SCALE));
@@ -92,6 +93,7 @@ export async function downloadChartImage({
     width,
     (text) => context.measureText(text).width,
     rangeBand,
+    bandMethod,
   );
   const legendHeight = legendRows.length
     ? PADDING * 2 + legendRows.reduce((total, row) => total + row.height, 0)

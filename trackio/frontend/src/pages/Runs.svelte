@@ -1,5 +1,9 @@
 <script>
+  import ActivityDot from "../components/ActivityDot.svelte";
+  import { configFilterKeys, configKeyLabel } from "../lib/runFilters.js";
+  import { getRunConfigRevisions, updateRunConfigs } from "../lib/api.js";
   import { compileConfigFilter, filterRunsByConfig } from "../lib/runFilters.js";
+  import { computeGroupedRunEntries, groupForRun } from "../lib/grouping.js";
   import { tick, untrack } from "svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import {
@@ -18,11 +22,60 @@
     runs = [],
     filterText = "",
     configFilters = [],
+    groupByKeys = [],
+    configColumns = $bindable([]),
     runConfigs = {},
     onRunsChanged = null,
     runMutationAllowed = true,
   } = $props();
 
+  let configDialog = $state(null);
+  let configProject = $state(null);
+  let configTargets = $state([]);
+  let configPath = $state("");
+  let configValue = $state("");
+  let configType = $state("string");
+  let configError = $state("");
+  let configSaving = $state(false);
+  let configRevisions = $state({});
+  let configOptions = $derived(configFilterKeys(runConfigs));
+  function cellValue(run, key) {
+    let value = runConfigs[run.id] ?? runConfigs[run.name];
+    for (const part of JSON.parse(key)) value = value?.[part];
+    return value;
+  }
+  async function editConfig(targets, key = "") {
+    configError = "";
+    configProject = project;
+    configTargets = targets;
+    configPath = key;
+    const value = key && targets.length === 1 ? cellValue(targets[0], key) : "";
+    configType = value === null ? "null" : typeof value;
+    if (!["string", "number", "boolean", "null"].includes(configType)) configType = "string";
+    configValue = value == null ? "" : String(value);
+    try {
+      configRevisions = await getRunConfigRevisions(configProject);
+      if (configProject === project) configDialog.showModal();
+    } catch { configError = "Could not load configuration revisions."; }
+  }
+  async function saveConfig() {
+    if (configProject !== project) { configDialog.close(); return; }
+    configSaving = true;
+    configError = "";
+    try {
+      const path = configPath.startsWith("[") ? JSON.parse(configPath) : [configPath];
+      const value = configType === "null" ? null : configType === "number" ? Number(configValue)
+        : configType === "boolean" ? configValue === "true" : configValue;
+      if (configType === "number" && (!configValue.trim() || !Number.isFinite(value))) throw new Error("Enter a finite number");
+      if (configTargets.length > 1 && !confirm(`Set this field on ${configTargets.length} runs?`)) return;
+      await updateRunConfigs(configProject, configTargets.map((run) => ({
+        run: run.name, run_id: run.id, revision: configRevisions[run.id ?? run.name] ?? 0,
+      })), path, value);
+      await onRunsChanged?.();
+      configDialog.close();
+    } catch (error) { configError = error.message || "Could not update configuration; refresh and retry."; }
+    finally { configSaving = false; }
+  }
   let deleting = $state(false);
   let deleteError = $state("");
   let selectedKeys = $state([]);
@@ -48,6 +101,10 @@
     const matches = new Set(filterMetricsByRegex(configRuns.map((r) => r.name), filterText));
     return configRuns.filter((r) => matches.has(r.name));
   });
+
+  let collapsedGroups = $state(new Set());
+  let groupedRows = $derived(computeGroupedRunEntries(filteredRuns, runConfigs, groupByKeys));
+  let tableRows = $derived(groupedRows ? [...groupedRows.values()].flatMap((group) => group.runs) : filteredRuns);
 
   let selectedVisibleRuns = $derived(
     selectionProject === project
@@ -202,7 +259,23 @@
   }
 </script>
 
+<dialog bind:this={configDialog} aria-label="Edit configuration">
+  <h2>Edit configuration</h2>
+  <label>Field (a name or JSON path array)<input bind:value={configPath} /></label>
+  <label>Type<select bind:value={configType}>{#each ["string", "number", "boolean", "null"] as type}<option value={type}>{type}</option>{/each}</select></label>
+  {#if configType === "boolean"}<select aria-label="Boolean value" bind:value={configValue}><option value="true">true</option><option value="false">false</option></select>
+  {:else if configType !== "null"}<label>Value<input bind:value={configValue} /></label>{/if}
+  {#if configError}<p role="alert">{configError}</p>{/if}
+  <button disabled={configSaving} onclick={saveConfig}>Save</button>
+  <button disabled={configSaving} onclick={() => configDialog.close()}>Cancel</button>
+</dialog>
 <div class="runs-page">
+  {#if configError && !configDialog?.open}<p role="alert">{configError}</p>{/if}
+  <details><summary>Config columns</summary>
+    {#each configOptions as option}<label><input type="checkbox" checked={configColumns.includes(option.value)}
+      onchange={(event) => { configColumns = event.currentTarget.checked ? [...configColumns, option.value] : configColumns.filter((key) => key !== option.value); }} />{option.label}</label>{/each}
+  </details>
+  <button disabled={!canMutateRuns || selectedVisibleRuns.length === 0} onclick={() => editConfig(selectedVisibleRuns)}>Set config field on selected runs</button>
   {#if deleteError}
     <p role="alert" class="delete-error">{deleteError}</p>
   {/if}
@@ -248,13 +321,20 @@
           <th>Run Name</th>
           <th>Steps</th>
           <th>Last Step</th>
+          {#each configColumns as key}<th>{configKeyLabel(key)}</th>{/each}
           {#if hasArtifacts}
             <th>Artifacts</th>
           {/if}
         </tr>
       </thead>
       <tbody>
-        {#each filteredRuns as run, i}
+        {#each tableRows as run, i}
+          {@const group = groupByKeys.length ? groupForRun(run, runConfigs, groupByKeys) : null}
+          {#if group && (i === 0 || groupForRun(tableRows[i - 1], runConfigs, groupByKeys).id !== group.id)}
+            <tr><td colspan={(hasArtifacts ? 7 : 6) + configColumns.length}><button aria-expanded={!collapsedGroups.has(group.id)}
+              onclick={() => { const next = new Set(collapsedGroups); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); collapsedGroups = next; }}>{group.label} ({groupedRows.get(group.id).runs.length})</button></td></tr>
+          {/if}
+          {#if !group || !collapsedGroups.has(group.id)}
           <tr>
             <td class="selection-cell">
               <input
@@ -267,6 +347,7 @@
             </td>
             <td class="actions-cell">
               <div class="actions-wrap">
+              <button disabled={!canMutateRuns} onclick={() => editConfig([run])}>+ Config</button>
               <button
                 class="action-btn"
                 title={canMutateRuns ? "Rename" : "Sign in with Hugging Face (write access) to rename runs"}
@@ -310,6 +391,7 @@
                     style:background={runColorMap[run.id ?? run.name] ??
                       "#9ca3af"}
                   ></span>
+                  <ActivityDot activity={runs.find((record) => record.id === run.id)?.activity} />
                   <button class="link-btn" onclick={() => openRunDetail(run.name, run.id)}>
                     {run.name}
                   </button>
@@ -318,6 +400,10 @@
             </td>
             <td>{run.numSteps}</td>
             <td>{run.lastStep}</td>
+            {#each configColumns as key}
+              {@const value = cellValue(run, key)}
+              <td><button disabled={!canMutateRuns || (value !== null && typeof value === "object")} onclick={() => editConfig([run], key)}>{JSON.stringify(value) ?? "(unset)"}</button></td>
+            {/each}
             {#if hasArtifacts}
               <td>
                 {#if run.outputs > 0 || run.inputs > 0}
@@ -345,6 +431,7 @@
               </td>
             {/if}
           </tr>
+          {/if}
         {/each}
       </tbody>
     </table>

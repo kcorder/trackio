@@ -18,6 +18,7 @@
     colorMap = {},
     csvExports = undefined,
     title = "",
+    bandMethod = "range",
     draggable = false,
     ondragstart = null,
     ondragover = null,
@@ -75,6 +76,8 @@
           key,
           label: d[colorDisplayField] || key,
           value: d[y],
+          band_lower: d.band_lower ?? d.run_min,
+          band_upper: d.band_upper ?? d.run_max,
           run_min: d.run_min,
           run_max: d.run_max,
           n: d.n,
@@ -126,6 +129,10 @@
       tooltip: [
         { field: "label", type: "nominal", title: "Run" },
         { field: "value", type: "quantitative", title: yTitle },
+        ...(barData.some((row) => row.run_min != null) ? [
+          { field: "band_lower", type: "quantitative", title: bandMethod === "std" ? "Mean −1 SD" : "Minimum" },
+          { field: "band_upper", type: "quantitative", title: bandMethod === "std" ? "Mean +1 SD" : "Maximum" },
+        ] : []),
       ],
     };
     const barMark = { type: "bar", cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 };
@@ -142,12 +149,12 @@
         layer: [
           { mark: barMark, encoding },
           {
-            transform: [{ filter: "datum.run_min != null" }],
+            transform: [{ filter: "datum.band_lower != null" }],
             mark: { type: "rule", strokeWidth: 2 },
             encoding: {
               x: encoding.x,
-              y: { field: "run_min", type: "quantitative" },
-              y2: { field: "run_max" },
+              y: { field: "band_lower", type: "quantitative" },
+              y2: { field: "band_upper" },
               color: encoding.color,
             },
           },
@@ -254,6 +261,8 @@
         color: colorMap[row.key] || "#999",
       }));
       await downloadChartImage({
+        bandMethod,
+        rangeBand: data.some((row) => row.run_min != null),
         view,
         filename: `${(y || "chart").replace(/\//g, "_")}.png`,
         title,

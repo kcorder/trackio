@@ -353,3 +353,13 @@ export async function fetchMediaBlob(path) {
   if (_staticMode) return staticApi.fetchMediaBlob(path);
   return getMediaUrl(path);
 }
+
+export async function getRunConfigRevisions(project) {
+  if (await isStaticMode()) return {};
+  return await callApi("/get_run_config_revisions", { project });
+}
+
+export async function updateRunConfigs(project, targets, path, value) {
+  if (await isStaticMode()) throw new Error("Not supported in static mode");
+  return await callApi("/update_run_configs", { project, targets, path, value });
+}

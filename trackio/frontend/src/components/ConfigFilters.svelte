@@ -1,5 +1,5 @@
 <script>
-  import { configFilterKeys, configKeyLabel } from "../lib/runFilters.js";
+  import { configFilterKeys, configKeyLabel, configValueChoices, parseMembership } from "../lib/runFilters.js";
 
   let { configs = {}, groups = $bindable([]), matchCount = null } = $props();
   let open = $state(false);
@@ -8,6 +8,7 @@
   let count = $derived(activeGroups.flat().length);
   let dialog;
   let draft = $state([]);
+  let valueSearch = $state("");
 
   function edit() {
     draft = groups.map((group) => group.map((rule) => ({ ...rule })));
@@ -70,11 +71,25 @@
             {#each keys as key}<option value={key.value}>{key.label}</option>{/each}
           </select>
           <select aria-label="Comparison operator" bind:value={rule.operator}>
-            {#each ["=", "!=", ">", ">=", "<", "<=", "contains"] as operator}
+            {#each ["=", "!=", ">", ">=", "<", "<=", "contains", "IN"] as operator}
               <option value={operator}>{operator}</option>
             {/each}
           </select>
-          <input aria-label="Configuration value" placeholder="Value" bind:value={rule.value} />
+          {#if rule.operator === "IN"}
+            <fieldset>
+              <legend>Match any selected value</legend>
+              <input aria-label="Search configuration values" placeholder="Search values" bind:value={valueSearch} />
+              {#each configValueChoices(configs, rule.key).filter((choice) => choice.label.toLowerCase().includes(valueSearch.toLowerCase())) as choice}
+                <label><input type="checkbox" checked={parseMembership(rule.value).some((v) => JSON.stringify(v) === choice.token)}
+                  onchange={(event) => {
+                    const selected = parseMembership(rule.value).filter((v) => JSON.stringify(v) !== choice.token);
+                    rule.value = JSON.stringify(event.currentTarget.checked ? [...selected, JSON.parse(choice.token)] : selected);
+                  }} />{choice.label}</label>
+              {/each}
+            </fieldset>
+          {:else}
+            <input aria-label="Configuration value" placeholder="Value" bind:value={rule.value} />
+          {/if}
           <button class="remove" aria-label="Remove condition" onclick={() => remove(i, j)}>×</button>
         </div>
       {/each}

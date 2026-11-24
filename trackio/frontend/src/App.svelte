@@ -1,6 +1,7 @@
 <script>
   import { compileConfigFilter, filterRunsByConfig, filterRunsByName, parseConfigFilters } from "./lib/runFilters.js";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
+  import { normalizeView, readViews, writeViews, viewStorageKey } from "./lib/savedViews.js";
   import Navbar from "./components/Navbar.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import AlertPanel from "./components/AlertPanel.svelte";
@@ -122,6 +123,7 @@
   });
   let groupByKeys = $state([]);
   let showGroupedMean = $state(true);
+  let bandMethod = $state("range");
   let metricColumns = $state([]);
   let requestedUrlXAxis = $state(null);
   let urlXAxisApplied = $state(false);
@@ -279,7 +281,8 @@
       if (selectedProject !== project) return;
       const newRuns = [...(data || [])].reverse();
 
-      if (JSON.stringify(runs) !== JSON.stringify(newRuns)) {
+      const structuralRuns = (records) => records.map((record) => [record.id, record.name, record.created_at]);
+      if (JSON.stringify(structuralRuns(runs)) !== JSON.stringify(structuralRuns(newRuns))) {
         const prevSelected = selectedRuns;
         const prevOrdered = runs.map(runKey);
         runs = newRuns;
@@ -289,6 +292,8 @@
           prevOrdered,
         );
       }
+      const activityByRun = new Map(newRuns.map((run) => [runKey(run), run.activity]));
+      for (const run of runs) run.activity = activityByRun.get(runKey(run));
       if (configs != null) {
         if (JSON.stringify(runConfigs) !== JSON.stringify(configs)) {
           runConfigs = configs;
@@ -505,6 +510,7 @@
       metric_filter: metricFilter,
       run_filter: filterText,
       config_filter: configFilters,
+      controls: currentView,
       total_runs: runs.length,
     }));
     const stopViewStateBridge = startViewStateBridge();
@@ -642,11 +648,63 @@
   function markSidebarUserControlled() {
     sidebarUserControlled = true;
   }
+
+  let configColumns = $state([]);
+  let restoredViewProject = $state(null);
+  let lastRestoreSignature = $state(null);
+  let encodedViewQuery = $derived.by(() => { urlTick; return getQueryParam("view"); });
+  let restoreSignature = $derived(JSON.stringify([selectedProject, encodedViewQuery, filterQuery]));
+  let storageKey = $derived(selectedProject ? viewStorageKey(selectedProject) : "");
+  let currentView = $derived({configFilters,groupByKeys,bandMethod,showGroupedMean,filterText,metricFilter,smoothing,xAxis,logScaleX,logScaleY,panelsPerRow,configColumns});
+  function applyView(value) {
+    const view = normalizeView(value);
+    configFilters = view.configFilters;
+    groupByKeys = view.groupByKeys;
+    bandMethod = view.bandMethod;
+    showGroupedMean = view.showGroupedMean;
+    filterText = view.filterText;
+    metricFilter = view.metricFilter;
+    smoothing = view.smoothing;
+    xAxis = view.xAxis;
+    logScaleX = view.logScaleX;
+    logScaleY = view.logScaleY;
+    panelsPerRow = view.panelsPerRow;
+    configColumns = view.configColumns;
+    if (getQueryParam("run_ids") === null && getQueryParam("runs") === null) selectedRuns = runs.map(runKey);
+  }
+  $effect(() => {
+    const project = selectedProject;
+    const encoded = encodedViewQuery;
+    const signature = restoreSignature;
+    if (!project || signature === lastRestoreSignature) return;
+    untrack(() => {
+      lastRestoreSignature = signature;
+      if (encoded) {
+        try { applyView(JSON.parse(encoded)); } catch { applyView(null); }
+      } else if (!["config_filter", "run_filter", "metric_filter", "run_ids", "runs", "smoothing", "x_axis"].some((key) => getQueryParam(key) !== null)) {
+        applyView(readViews(viewStorageKey(project)).latest);
+      }
+      restoredViewProject = project;
+    });
+  });
+  $effect(() => {
+    const view = currentView;
+    const key = storageKey;
+    if (!key || restoredViewProject !== selectedProject) return;
+    const timer = setTimeout(() => {
+      writeViews(key, { ...readViews(key), latest: $state.snapshot(view) });
+    }, 250);
+    return () => clearTimeout(timer);
+  });
+
 </script>
 
 <div class="app">
   {#if showSidebar && !sidebarHidden}
     <Sidebar
+      {storageKey}
+      view={currentView}
+      onapplyView={applyView}
       bind:open={sidebarOpen}
       onToggle={markSidebarUserControlled}
       variant={sidebarVariant}
@@ -676,9 +734,11 @@
       }}
       bind:showHeaders
       bind:showComparer
+      onRunsChanged={refreshRunsAndMutation}
       bind:configFilters
       bind:filterText
       bind:groupByKeys
+      bind:bandMethod
       bind:showGroupedMean
       {metricColumns}
       {availableSystemDevices}
@@ -722,6 +782,7 @@
           allRuns={runs}
           {runConfigs}
           {groupByKeys}
+          {bandMethod}
           {showGroupedMean}
           {smoothing}
           {panelsPerRow}
@@ -769,6 +830,8 @@
           project={selectedProject}
           {runs}
           {filterText}
+          bind:configColumns
+          {groupByKeys}
           {configFilters}
           {runConfigs}
           onRunsChanged={refreshRunsAndMutation}

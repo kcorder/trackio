@@ -1,9 +1,12 @@
 <script>
+  import ActivityDot from "./ActivityDot.svelte";
   let {
     choices = [],
     selected = $bindable([]),
     colors = [],
     ontoggle = null,
+    onremove = null,
+    removeDisabled = false,
     getKey = (choice) => choice,
     getLabel = (choice) => choice,
   } = $props();
@@ -21,19 +24,29 @@
 
 <div class="checkbox-group">
   {#each choices as choice, i}
-    <label class="checkbox-item">
+    <div class="checkbox-row"><label class="checkbox-item">
       <input
         type="checkbox"
         checked={selected.includes(getKey(choice))}
         onchange={() => toggle(choice)}
       />
       <span class="color-dot" style="background: {colors[i] || '#999'}"></span>
+      <ActivityDot activity={choice?.activity} />
       <span class="run-name" title={getLabel(choice)}>{getLabel(choice)}</span>
     </label>
+    {#if onremove}
+      <button class="remove-run" disabled={removeDisabled} aria-label={`Delete run ${getLabel(choice)}`} onclick={() => onremove(choice)}>×</button>
+    {/if}
+    </div>
   {/each}
 </div>
 
 <style>
+  .checkbox-row { display: flex; align-items: center; }
+  .checkbox-item { flex: 1; min-width: 0; }
+  .remove-run { opacity: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+  .checkbox-row:hover .remove-run, .checkbox-row:focus-within .remove-run { opacity: 1; }
+
   .checkbox-group {
     display: flex;
     flex-direction: column;

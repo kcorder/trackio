@@ -27,6 +27,7 @@ export function buildViewUrl(location, view) {
   const url = new URL(location.href);
   const params = url.searchParams;
   for (const key of [
+    "view",
     "project",
     "selected_project",
     "run_ids",
@@ -43,6 +44,7 @@ export function buildViewUrl(location, view) {
   ]) {
     params.delete(key);
   }
+  if (view.controls) params.set("view", JSON.stringify(view.controls));
   if (view.project) params.set("project", view.project);
   if (Array.isArray(view.runs)) {
     params.set("run_ids", view.runs.map((r) => r.id ?? r.name).join(","));
@@ -64,6 +66,7 @@ export function buildSnapshot({ location = window.location, now = new Date() } =
   const app = parts.app || {};
   const metrics = parts.metrics || {};
   const view = {
+    controls: app.controls ?? null,
     page: app.page ?? null,
     project: app.project ?? null,
     space_id: app.space_id ?? null,

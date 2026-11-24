@@ -26,6 +26,7 @@
     rangeBand = false,
     csvExports = undefined,
     title = "",
+    bandMethod = "range",
     xLim = null,
     yExtent = undefined,
     onSelect = null,
@@ -204,12 +205,12 @@
 
     if (rangeBand) {
       layers.push({
-        data: { name: "data_range", values: data.filter((row) => row.run_min != null && row.run_max != null) },
+        data: { name: "data_range", values: data.filter((row) => row.run_min != null && row.run_max != null).map((row) => ({...row, band_lower: row.band_lower ?? row.run_min, band_upper: row.band_upper ?? row.run_max})) },
         mark: { type: "area", clip: true, opacity: 0.18 },
         encoding: {
           x: xEnc,
-          y: { field: "run_min", type: "quantitative", ...(yExtent ? { scale: { domain: yExtent } } : {}) },
-          y2: { field: "run_max" },
+          y: { field: "band_lower", type: "quantitative", ...(yExtent ? { scale: { domain: yExtent } } : {}) },
+          y2: { field: "band_upper" },
           ...segmentEnc,
           ...colorEnc,
         },
@@ -244,7 +245,11 @@
       { field: xVegaField, type: "quantitative", title: x },
       { field: yVegaField, type: "quantitative", title: yTitle },
     );
-    if (rangeBand) tooltipEnc.push({ field: "n", type: "quantitative", title: "Runs" });
+    if (rangeBand) tooltipEnc.push(
+      { field: "n", type: "quantitative", title: "Runs" },
+      { field: "band_lower", type: "quantitative", title: bandMethod === "std" ? "Mean −1 SD" : "Minimum" },
+      { field: "band_upper", type: "quantitative", title: bandMethod === "std" ? "Mean +1 SD" : "Maximum" },
+    );
 
     const hoverParams = [{
       name: "hover",
@@ -342,7 +347,7 @@
     const xDomain = computeXDomain(originalData);
     const xKey = xDomain ? `${xDomain[0]},${xDomain[1]}` : "auto";
     const yKey = yExtent ? `${yExtent[0]},${yExtent[1]}` : "auto";
-    return `${y}\0${x}\0${colorSpecKey}\0${dashSpecKey}\0${title}\0${fullscreen}\0${!!onSelect}\0${rangeBand}\0${xKey}\0${yKey}`;
+    return `${y}\0${x}\0${colorSpecKey}\0${dashSpecKey}\0${title}\0${fullscreen}\0${!!onSelect}\0${rangeBand}\0${bandMethod}\0${xKey}\0${yKey}`;
   }
 
   function replaceDataset(v, name, newData) {
@@ -366,7 +371,7 @@
         replaceDataset(view, "data_plot", data);
       }
       if (rangeBand) {
-        replaceDataset(view, "data_range", data.filter((row) => row.run_min != null && row.run_max != null));
+        replaceDataset(view, "data_range", data.filter((row) => row.run_min != null && row.run_max != null).map((row) => ({...row, band_lower: row.band_lower ?? row.run_min, band_upper: row.band_upper ?? row.run_max})));
       }
 
       view.run();
@@ -500,6 +505,7 @@
         legendEntries,
         dashLegendEntries,
         rangeBand,
+        bandMethod,
       });
     } catch (e) {
       console.error("Failed to export image:", e);

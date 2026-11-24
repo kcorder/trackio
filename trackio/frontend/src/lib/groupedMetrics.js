@@ -97,13 +97,16 @@ export function computeGroupedMetric(masterData, metric, xColumn, runs, runConfi
     for (const x of sharedGrid(groupRuns, gridPoints)) {
       let n = 0;
       let mean = 0;
+      let m2 = 0;
       let runMin = Infinity;
       let runMax = -Infinity;
       for (const run of groupRuns) {
         const value = valueAt(run, x);
         if (value === null) continue;
         n++;
-        mean += (value - mean) / n;
+        const delta = value - mean;
+        mean += delta / n;
+        m2 += delta * (value - mean);
         runMin = Math.min(runMin, value);
         runMax = Math.max(runMax, value);
       }
@@ -113,7 +116,7 @@ export function computeGroupedMetric(masterData, metric, xColumn, runs, runConfi
       }
       if (previousX !== null && (missingPoint || x - previousX > maxDisplayGap)) segment++;
       const row = {
-        [xColumn]: x, [metric]: mean, run_min: runMin, run_max: runMax, n,
+        [xColumn]: x, [metric]: mean, std: Math.sqrt(Math.max(0, m2 / n)), run_min: runMin, run_max: runMax, n,
         group: group.label, series_key: group.id, segment_key: `${group.id}:${segment}`, run: group.label,
         data_type: "original",
       };
@@ -148,7 +151,7 @@ export function buildRawGroupedRows(logsByRun, metric, xAxis, runs, runConfigs, 
   return rows;
 }
 
-export function groupedCsvExports(result, metric, xColumn, rawRows) {
+export function groupedCsvExports(result, metric, xColumn, rawRows, bandMethod = "range") {
   const groupFields = result.fields.map((field) => field.key);
   return [
     {
@@ -158,8 +161,8 @@ export function groupedCsvExports(result, metric, xColumn, rawRows) {
     },
     {
       label: "Group summary CSV", filename: `${metric.replace(/\//g, "_")}-groups.csv`,
-      rows: result.summaryRows.map((row) => ({ ...row, mean: row[metric], x: row[xColumn] })),
-      columns: ["group", ...groupFields, "x", "mean", "run_min", "run_max", "n"],
+      rows: result.summaryRows.map((row) => ({ ...row, mean: row[metric], x: row[xColumn], band_method: bandMethod, band_lower: bandMethod === "std" ? row[metric] - row.std : row.run_min, band_upper: bandMethod === "std" ? row[metric] + row.std : row.run_max })),
+      columns: ["group", ...groupFields, "x", "mean", "run_min", "run_max", "std", "n", "band_method", "band_lower", "band_upper"],
     },
   ];
 }

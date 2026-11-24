@@ -1,6 +1,8 @@
 <script>
+  import SavedViews from "./SavedViews.svelte";
   import ConfigFilters from "./ConfigFilters.svelte";
   import { compileConfigFilter, filterRunsByConfig, filterRunsByName } from "../lib/runFilters.js";
+  import { deleteRun } from "../lib/api.js";
   import { onMount } from "svelte";
   import ColoredCheckbox from "./ColoredCheckbox.svelte";
   import Dropdown from "./Dropdown.svelte";
@@ -21,6 +23,9 @@
 
   let {
     open = $bindable(true),
+    storageKey = "",
+    view = {},
+    onapplyView = null,
     onToggle,
     variant = "full",
     currentPage = "metrics",
@@ -40,12 +45,14 @@
     realtimeEnabled = $bindable(true),
     metricRefreshInterval = $bindable("auto"),
     onSyncMetrics = null,
+    onRunsChanged = null,
     showHeaders = $bindable(true),
     showComparer = $bindable(false),
     filterText = $bindable(""),
     configFilters = $bindable([]),
     groupByKeys = $bindable([]),
     showGroupedMean = $bindable(true),
+    bandMethod = $bindable("range"),
     runConfigs = {},
     metricColumns = [],
     spacesMode = false,
@@ -58,6 +65,26 @@
     darkMode = false,
   } = $props();
 
+  let deletingRun = $state(false);
+  let deleteError = $state("");
+  async function removeRun(run) {
+    if (!runMutationAllowed || deletingRun) return;
+    if (!confirm(`Delete run "${run.name}"? This cannot be undone.`)) return;
+    const project = selectedProject;
+    deletingRun = true;
+    deleteError = "";
+    try {
+      if (!await deleteRun(project, run)) throw new Error("Run could not be deleted");
+      if (project === selectedProject) {
+        selectedRuns = selectedRuns.filter((id) => id !== (run.id ?? run.name));
+        await onRunsChanged?.();
+      }
+    } catch {
+      if (project === selectedProject) deleteError = "Could not delete run. Refresh and try again.";
+    } finally {
+      deletingRun = false;
+    }
+  }
   let navTick = $state(0);
   let copyFeedbackTimer = null;
 
@@ -105,13 +132,6 @@
   let filteredRunIds = $derived(filteredRuns.map((r) => r.id ?? r.name));
   let selectedRunSet = $derived(new Set(selectedRuns));
   let selectedFilteredIds = $derived(filteredRunIds.filter((id) => selectedRunSet.has(id)));
-
-  $effect(() => {
-    const valid = new Set(groupByOptions.map((o) => o.value));
-    if (groupByKeys.some((key) => !valid.has(key))) {
-      groupByKeys = groupByKeys.filter((key) => valid.has(key));
-    }
-  });
 
   let groupByOptions = $derived(computeGroupByOptions(runConfigs));
   let groupedRuns = $derived(computeGroupedRunEntries(filteredRuns, runConfigs, groupByKeys));
@@ -180,6 +200,7 @@
     if (!selectedProject) return "";
     const params = new URLSearchParams();
     params.set("project", selectedProject);
+    params.set("view", JSON.stringify(view));
     if (metricFilter?.trim()) {
       params.set("metric_filter", metricFilter.trim());
     }
@@ -241,6 +262,8 @@
   {darkMode}
 >
   <div class="sidebar-sections">
+      {#if storageKey}<SavedViews {storageKey} {view} onapply={onapplyView} />{/if}
+      {#if deleteError}<p role="alert">{deleteError}</p>{/if}
       {#if variant === "compact" && currentPage === "runs"}
         <div class="section">
           <GradioTextbox
@@ -250,6 +273,29 @@
             bind:value={filterText}
           />
           <ConfigFilters configs={runConfigs} bind:groups={configFilters} matchCount={filteredRuns.length} />
+          <div class="group-by-row">
+            <Dropdown
+              label="Group by"
+              placeholder="Add a field..."
+              value={null}
+              choices={groupByOptions.filter((option) => option.value !== null && !groupByKeys.includes(option.value))}
+              clearOnSelect={true}
+              onSelect={(key) => {
+                if (key && !groupByKeys.includes(key)) groupByKeys = [...groupByKeys, key];
+              }}
+            />
+            {#if groupByKeys.length}
+              <div class="group-key-list">
+                {#each groupByKeys as key}
+                  <span class="group-key-chip">{groupByOptions.find((option) => option.value === key)?.label ?? key}
+                    <button type="button" aria-label={`Remove group field ${key}`}
+                      onclick={() => { groupByKeys = groupByKeys.filter((item) => item !== key); }}>×</button>
+                  </span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
         </div>
       {/if}
 
@@ -438,6 +484,8 @@
                   </div>
                   <div class="checkbox-list group-checkbox-list">
                     <ColoredCheckbox
+                      onremove={currentPage === "metrics" && runMutationAllowed ? removeRun : null}
+                      removeDisabled={deletingRun}
                       choices={groupRunList}
                       bind:selected={selectedRuns}
                       getKey={(run) => run.id ?? run.name}
@@ -454,6 +502,8 @@
           {:else}
             <div class="checkbox-list">
               <ColoredCheckbox
+                      onremove={currentPage === "metrics" && runMutationAllowed ? removeRun : null}
+                      removeDisabled={deletingRun}
                 choices={filteredRuns}
                 bind:selected={selectedRuns}
                 getKey={(run) => run.id ?? run.name}
@@ -528,8 +578,9 @@
               bind:checked={showHeaders}
             />
             {#if currentPage === "metrics"}
+              <Dropdown label="Group band" choices={[{label: "Observed range", value: "range"}, {label: "Standard deviation", value: "std"}]} bind:value={bandMethod} filterable={false} />
               <GradioCheckbox
-                label="Show grouped mean and run range"
+                label="Show grouped mean and band"
                 bind:checked={showGroupedMean}
               />
               <GradioCheckbox

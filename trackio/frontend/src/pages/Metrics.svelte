@@ -39,6 +39,7 @@
     runConfigs = {},
     groupByKeys = [],
     showGroupedMean = true,
+    bandMethod = "range",
     smoothing = 10,
     panelsPerRow = AUTO_PANELS_PER_ROW,
     xAxis = "step",
@@ -96,6 +97,7 @@
     runConfigs;
     groupByKeys;
     showGroupedMean;
+    bandMethod;
     return new Map();
   });
   let plotColorMap = $derived.by(() => {
@@ -132,20 +134,25 @@
       groupCache.set(metric, result);
     }
     const csvExports = groupedCsvExports(result, metric, xColumn,
-      () => buildRawGroupedRows(rawDataCache, metric, xAxis, selectedRuns, runConfigs, groupByKeys));
+      () => buildRawGroupedRows(rawDataCache, metric, xAxis, selectedRuns, runConfigs, groupByKeys), bandMethod);
     if (!groupedMode) {
       const plot = { ...computeMetricPlotData(masterData, xColumn, metric, xLim), csvExports };
       plotCache.set(metric, plot);
       return plot;
     }
+    const bandRows = result.rows.map((row) => ({
+      ...row,
+      band_lower: bandMethod === "std" ? row[metric] - row.std : row.run_min,
+      band_upper: bandMethod === "std" ? row[metric] + row.std : row.run_max,
+    }));
     const visible = xLim
-      ? result.rows.filter((row) => row[xColumn] >= xLim[0] && row[xColumn] <= xLim[1])
-      : result.rows;
+      ? bandRows.filter((row) => row[xColumn] >= xLim[0] && row[xColumn] <= xLim[1])
+      : bandRows;
     let yMin = Infinity;
     let yMax = -Infinity;
     for (const row of visible) {
-      yMin = Math.min(yMin, row.run_min ?? row[metric]);
-      yMax = Math.max(yMax, row.run_max ?? row[metric]);
+      yMin = Math.min(yMin, row.band_lower ?? row[metric]);
+      yMax = Math.max(yMax, row.band_upper ?? row[metric]);
     }
     const plot = {
       data: visible,
@@ -548,6 +555,7 @@
 </script>
 
 <div class="metrics-page" bind:this={pageElement}>
+  {#if groupedMode}<p>Mean with {bandMethod === "std" ? "±1 population standard deviation" : "observed min–max range"}; each contributing run has equal weight.</p>{/if}
   {#if !appBootstrapReady || !hasLoaded}
     <LoadingTrackio />
   {:else if !project}
@@ -603,6 +611,7 @@
                   {#if plotData.length > 0}
                     {#if useBar}
                       <BarPlot
+                        {bandMethod}
                         data={plotData}
                         csvExports={plotResult.csvExports}
                         y={metric}
@@ -617,6 +626,7 @@
                       />
                     {:else}
                       <LinePlot
+                        {bandMethod}
                         data={plotData}
                         csvExports={plotResult.csvExports}
                         rangeBand={groupedMode}
@@ -665,7 +675,8 @@
                       {#if plotData.length > 0}
                         {#if useBar}
                           <BarPlot
-                            data={plotData}
+                            {bandMethod}
+                        data={plotData}
                             csvExports={plotResult.csvExports}
                             y={metric}
                             title={subTitle}
@@ -679,7 +690,8 @@
                           />
                         {:else}
                           <LinePlot
-                            data={plotData}
+                            {bandMethod}
+                        data={plotData}
                             csvExports={plotResult.csvExports}
                             rangeBand={groupedMode}
                             x={xColumn}

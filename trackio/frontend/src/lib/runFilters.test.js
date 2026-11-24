@@ -51,3 +51,11 @@ it("combines name and configuration filters without changing run identities", ()
   const configs = { a: { size: 32 }, b: { size: 32 }, c: { size: 64 } };
   expect(filterRunsByConfig(filterRunsByName(runs, "TRAIN"), configs, compileConfigFilter([[rule(["size"], "32")]]))).toEqual([runs[0]]);
 });
+
+it("matches typed IN members without coercion, including null and missing values", () => {
+  const match = compileConfigFilter([[{key:'["x"]', operator:"IN", value:'[1,true,null,"one"]'}]]);
+  for (const x of [1,true,null,"one"]) expect(match({x})).toBe(true);
+  for (const x of ["1",false,2]) expect(match({x})).toBe(false);
+  expect(match({})).toBe(false);
+  expect(compileConfigFilter([[{key:'["x"]', operator:"IN", value:"[]"}]])({x:1})).toBe(false);
+});

@@ -75,7 +75,7 @@ describe("grouped metric aggregation", () => {
     const raw = serializeCsv(exports[0].rows, exports[0].columns);
     const summary = serializeCsv(exports[1].rows, exports[1].columns);
     expect(raw).toContain("run_id,run,group,config.args.model,x,loss");
-    expect(summary).toContain("group,config.args.model,x,mean,run_min,run_max,n");
+    expect(summary).toContain("group,config.args.model,x,mean,run_min,run_max,std,n");
   });
 
   test("raw export uses logged values while each group run uses smoothed rows when available", () => {
@@ -147,4 +147,12 @@ test("keeps literal dotted and nested grouping fields distinct in CSV exports", 
   const [, summary] = groupedCsvExports(result, "loss", "step", []);
   expect(summary.rows[0]).toMatchObject({ 'config.["args.lr"]': 1, "config.args.lr": 2 });
   expect(new Set(summary.columns).size).toBe(summary.columns.length);
+});
+
+test("population SD weights runs equally and is zero for a singleton", () => {
+  const runs = [{id:"a"}, {id:"b"}, {id:"c"}];
+  const configs = {a:{model:"small"}, b:{model:"small"}, c:{model:"large"}};
+  const result = computeGroupedMetric([{run_id:"a",step:1,loss:2},{run_id:"b",step:1,loss:6},{run_id:"c",step:1,loss:9}], "loss", "step", runs, configs, ["model"]);
+  expect(result.rows.find((row) => row.group === "small")).toMatchObject({loss:4,std:2,run_min:2,run_max:6,n:2});
+  expect(result.rows.find((row) => row.group === "large").std).toBe(0);
 });
