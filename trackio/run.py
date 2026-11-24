@@ -192,6 +192,14 @@ class Run:
             webhook_min_level or os.environ.get("TRACKIO_WEBHOOK_MIN_LEVEL")
         )
 
+        self._lifecycle_event = {
+            "project": self.project,
+            "run": self.name,
+            "run_id": self.id,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "session_id": uuid.uuid4().hex,
+        }
+        self._record_lifecycle()
         if self._is_local:
             self._start_background_thread(
                 "_local_sender_thread",
@@ -390,6 +398,39 @@ class Run:
                     "local-sender-loop",
                     f"trackio's local logging thread hit an internal error: {e}. User code will continue, but some Trackio data may be dropped.",
                 )
+
+    def _record_lifecycle(self, finished=False):
+        if not hasattr(self, "_lifecycle_event"):
+            return
+        from trackio.run_lifecycle import accept_event, queue_event
+
+        event = dict(self._lifecycle_event)
+        if finished:
+            event["finished_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            if self._is_local and self._storage_mode != "jsonl":
+                accept_event(**event)
+            elif self._storage_mode == "jsonl":
+                self._persist_records_as_fragments(
+                    [{"v": 1, "kind": "lifecycle", "event": event}],
+                    "lifecycle-fragment",
+                )
+            else:
+                queue_event(self.project, self._remote_storage_key, event)
+                self._has_local_buffer = True
+        except Exception as error:
+            self._warn_once("lifecycle", f"Could not persist run lifecycle: {error}")
+
+    def _flush_lifecycle(self):
+        from trackio.run_lifecycle import clear_event, pending_events
+
+        for event_id, event in pending_events(self.project, self._remote_storage_key):
+            self._client.predict(
+                api_name="/update_run_lifecycle",
+                hf_token=self._hf_token_for_remote(),
+                **event,
+            )
+            clear_event(self.project, event_id)
 
     def _stamped_records(self, records: list[dict]) -> list[dict]:
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -765,6 +806,12 @@ class Run:
 
     def _flush_local_buffer(self) -> bool:
         try:
+            self._flush_lifecycle()
+        except Exception as error:
+            self._warn_once(
+                "lifecycle-upload", f"Run lifecycle could not be delivered: {error}"
+            )
+        try:
             buffered_logs = SQLiteStorage.get_pending_logs(
                 self.project, space_id=self._remote_storage_key
             )
@@ -964,6 +1011,18 @@ class Run:
         bucket rather than replayed to the Space.
         """
         try:
+            from trackio.run_lifecycle import (
+                clear_event,
+                pending_events,
+            )
+
+            for event_id, event in pending_events(
+                self.project, self._remote_storage_key
+            ):
+                self._fragment_writer.write_to_bucket(
+                    [{"v": 1, "kind": "lifecycle", "event": event}], self._bucket_id
+                )
+                clear_event(self.project, event_id)
             pending = SQLiteStorage.get_pending_logs(
                 self.project, space_id=self._remote_storage_key
             )
@@ -1001,6 +1060,18 @@ class Run:
         if self._bucket_id is None or not self._has_local_buffer:
             return
         try:
+            from trackio.run_lifecycle import (
+                clear_event,
+                pending_events,
+            )
+
+            for event_id, event in pending_events(
+                self.project, self._remote_storage_key
+            ):
+                self._fragment_writer.write_to_bucket(
+                    [{"v": 1, "kind": "lifecycle", "event": event}], self._bucket_id
+                )
+                clear_event(self.project, event_id)
             pending = SQLiteStorage.get_pending_logs(
                 self.project, space_id=self._remote_storage_key
             )
@@ -1876,6 +1947,7 @@ class Run:
             _emit_nonfatal_warning(f"trackio.log_system() failed: {e}")
 
     def finish(self):
+        self._record_lifecycle(finished=True)
         try:
             if self._console_capture is not None:
                 try:
@@ -1936,6 +2008,14 @@ class Run:
                 else:
                     self._flush_queues_inline()
 
+                if self._client is not None:
+                    try:
+                        self._flush_lifecycle()
+                    except Exception as error:
+                        self._warn_once(
+                            "finish-lifecycle",
+                            f"Could not deliver final run lifecycle: {error}",
+                        )
                 try:
                     has_pending = SQLiteStorage.has_pending_data(
                         self.project, space_id=self._remote_storage_key

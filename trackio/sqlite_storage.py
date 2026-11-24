@@ -28,7 +28,10 @@ import orjson
 
 from trackio import cas, references
 from trackio.commit_scheduler import CommitScheduler
+from trackio.dashboard_config import effective_config
+from trackio.dashboard_config import migrate as migrate_dashboard_config
 from trackio.dummy_commit_scheduler import DummyCommitScheduler
+from trackio.run_lifecycle import migrate as migrate_run_lifecycle
 from trackio.typehints import (
     ARTIFACT_BLOB_UPLOAD_KIND,
     MEDIA_UPLOAD_KIND,
@@ -530,9 +533,11 @@ def _migrate_add_run_ids(cursor: sqlite3.Cursor) -> None:
     cursor.execute("DROP TABLE trackio_run_ids")
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 _SCHEMA_MIGRATIONS: dict[int, Callable[[sqlite3.Cursor], None]] = {
     2: _migrate_add_run_ids,
+    3: migrate_dashboard_config,
+    4: migrate_run_lifecycle,
 }
 
 
@@ -545,6 +550,14 @@ class SQLiteStorage:
     _scheduler_lock = Lock()
 
     _ARTIFACT_PARQUET_TABLES: dict[str, list[str]] = {
+        "run_lifecycle": [
+            "run_id",
+            "run_name",
+            "started_at",
+            "session_id",
+            "finished_at",
+        ],
+        "dashboard_config_overrides": ["run_id", "overrides", "revision"],
         "artifacts": ["id", "name", "type", "description", "created_at"],
         "artifact_versions": [
             "id",
@@ -1383,7 +1396,17 @@ class SQLiteStorage:
             ) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f"SELECT * FROM {table}")
-                return [dict(row) for row in cursor.fetchall()]
+                rows = [dict(row) for row in cursor.fetchall()]
+                if table == "configs":
+                    for row in rows:
+                        row["config"] = orjson.dumps(
+                            effective_config(
+                                conn,
+                                row.get("run_id") or row["run_name"],
+                                orjson.loads(row["config"]),
+                            )
+                        )
+                return rows
         except Exception:
             return []
 
@@ -3629,8 +3652,10 @@ class SQLiteStorage:
                 row = cursor.fetchone()
                 if row:
                     config = orjson.loads(row["config"])
-                    return deserialize_values(config)
-                return None
+                    return effective_config(
+                        conn, run_identity[1], deserialize_values(config)
+                    )
+                return effective_config(conn, run_identity[1], {})
             except sqlite3.OperationalError as e:
                 if "no such table: configs" in str(e):
                     return None
@@ -3781,6 +3806,21 @@ class SQLiteStorage:
                         f"DELETE FROM metrics WHERE {run_identity[0]} = ?",
                         (run_identity[1],),
                     )
+                    if "dashboard_config_overrides" in {
+                        row[0]
+                        for row in conn.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    }:
+                        cursor.execute(
+                            "DELETE FROM dashboard_config_overrides WHERE run_id = ?",
+                            (run_identity[1],),
+                        )
+                    if SQLiteStorage._table_columns(conn, "run_lifecycle"):
+                        cursor.execute(
+                            "DELETE FROM run_lifecycle WHERE run_id = ?",
+                            (run_identity[1],),
+                        )
                     config_identity = SQLiteStorage._resolve_run_identity(
                         conn, run_name=run, run_id=run_id, table="configs"
                     )
@@ -4133,6 +4173,11 @@ class SQLiteStorage:
                     except sqlite3.OperationalError:
                         pass
 
+                    if SQLiteStorage._table_columns(conn, "run_lifecycle"):
+                        cursor.execute(
+                            "UPDATE run_lifecycle SET run_name = ? WHERE run_id = ?",
+                            (new_name, run_id or old_name),
+                        )
                     legacy_rows_renameable = (
                         run_col == "run_id"
                         and not SQLiteStorage._run_name_still_in_use(
@@ -4580,6 +4625,40 @@ class SQLiteStorage:
                             except sqlite3.OperationalError:
                                 pass
 
+                        if SQLiteStorage._table_columns(
+                            source_conn, "dashboard_config_overrides"
+                        ):
+                            override = source_conn.execute(
+                                "SELECT overrides, revision FROM dashboard_config_overrides WHERE run_id = ?",
+                                (metrics_val,),
+                            ).fetchone()
+                            if override:
+                                target_cursor.execute(
+                                    "INSERT OR REPLACE INTO dashboard_config_overrides VALUES (?, ?, ?)",
+                                    (
+                                        generated_run_id or metrics_val,
+                                        override[0],
+                                        override[1],
+                                    ),
+                                )
+                                source_cursor.execute(
+                                    "DELETE FROM dashboard_config_overrides WHERE run_id = ?",
+                                    (metrics_val,),
+                                )
+                        if SQLiteStorage._table_columns(source_conn, "run_lifecycle"):
+                            lifecycle = source_conn.execute(
+                                "SELECT run_name, started_at, session_id, finished_at FROM run_lifecycle WHERE run_id = ?",
+                                (metrics_val,),
+                            ).fetchone()
+                            if lifecycle:
+                                target_cursor.execute(
+                                    "INSERT OR REPLACE INTO run_lifecycle VALUES (?, ?, ?, ?, ?)",
+                                    (generated_run_id or metrics_val, *lifecycle),
+                                )
+                                source_cursor.execute(
+                                    "DELETE FROM run_lifecycle WHERE run_id = ?",
+                                    (metrics_val,),
+                                )
                         target_conn.commit()
 
                         if target_media is not None:
@@ -4651,7 +4730,9 @@ class SQLiteStorage:
                 results = {}
                 for row in cursor.fetchall():
                     config = orjson.loads(row["config"])
-                    results[row[config_col]] = deserialize_values(config)
+                    results[row[config_col]] = effective_config(
+                        conn, row[config_col], deserialize_values(config)
+                    )
                 return results
             except sqlite3.OperationalError as e:
                 if "no such table: configs" in str(e):
@@ -4893,6 +4974,12 @@ class SQLiteStorage:
             return False
         with SQLiteStorage._get_connection(db_path) as conn:
             cursor = conn.cursor()
+            if SQLiteStorage._table_columns(conn, "run_lifecycle_outbox"):
+                if cursor.execute(
+                    "SELECT EXISTS(SELECT 1 FROM run_lifecycle_outbox WHERE (? IS NULL OR destination = ?))",
+                    (space_id, space_id),
+                ).fetchone()[0]:
+                    return True
             try:
                 cursor.execute(
                     "SELECT EXISTS(SELECT 1 FROM metrics WHERE space_id IS NOT NULL "

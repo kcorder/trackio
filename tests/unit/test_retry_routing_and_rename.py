@@ -65,9 +65,13 @@ def test_replay_only_delivers_current_destination(temp_dir):
                 "project", run_id, [{"loss": 1}], run_id=run_id, space_id=remote
             )
         assert run._flush_local_buffer()
-        client.predict.assert_called_once()
-        call = client.predict.call_args.kwargs
-        assert call["api_name"] == "/bulk_log"
+        metric_calls = [
+            call.kwargs
+            for call in client.predict.call_args_list
+            if call.kwargs.get("api_name") == "/bulk_log"
+        ]
+        assert len(metric_calls) == 1
+        call = metric_calls[0]
         assert [entry["run_id"] for entry in call["logs"]] == ["b"]
         pending = SQLiteStorage.get_pending_logs("project")
         assert [entry["run_id"] for entry in pending["logs"]] == ["a"]

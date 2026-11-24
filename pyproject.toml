@@ -117,6 +117,8 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 "trackio/gpu.py" = ["PLC0415"]
 "trackio/imports.py" = ["PLC0415"]
 "trackio/run.py" = ["PLC0415"]
+"trackio/dashboard_config.py" = ["PLC0415"]
+"trackio/run_lifecycle.py" = ["PLC0415"]
 "trackio/sqlite_storage.py" = ["PLC0415"]
 "trackio/utils.py" = ["PLC0415"]
 

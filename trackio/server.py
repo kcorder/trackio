@@ -34,10 +34,16 @@ from trackio.asgi_app import (
     create_trackio_starlette_app,
 )
 from trackio.console import DEFAULT_MAX_CHARS, read_console_output
+from trackio.dashboard_config import (
+    ConfigConflict,
+    revisions_for_project,
+    update_configs,
+)
 from trackio.exceptions import TrackioAPIError
 from trackio.media import get_project_media_path
 from trackio.registry_bucket import BucketRegistryStorage
 from trackio.registry_storage import RegistryStorage, validate_registry_name
+from trackio.run_lifecycle import accept_event, run_records
 from trackio.sqlite_storage import SQLiteStorage
 from trackio.typehints import (
     AlertEntry,
@@ -999,7 +1005,7 @@ def get_metric_values(
 
 
 def get_runs_for_project(project: str) -> list[dict[str, Any]]:
-    return SQLiteStorage.get_run_records(project)
+    return run_records(project, SQLiteStorage.get_run_records(project))
 
 
 def get_run_configs(project: str) -> dict[str, Any]:
@@ -1403,6 +1409,38 @@ def rename_run(
     return True
 
 
+def update_run_lifecycle(
+    request: Request,
+    project: str,
+    run: str,
+    run_id: str,
+    started_at: str,
+    session_id: str,
+    finished_at: str | None = None,
+    hf_token: str | None = None,
+) -> bool:
+    assert_can_write_metrics(request, hf_token)
+    _validate_project_name(project)
+    accept_event(project, run, run_id, started_at, session_id, finished_at)
+    return True
+
+
+def get_run_config_revisions(project: str) -> dict:
+    return revisions_for_project(project)
+
+
+def update_run_configs(
+    request: Request, project: str, targets: list[dict], path: list[str], value: Any
+) -> dict:
+    assert_can_mutate_runs(request)
+    try:
+        return update_configs(project, targets, path, value)
+    except ConfigConflict as error:
+        raise ConfigConflict(str(error)) from error
+    except ValueError as error:
+        raise TrackioAPIError(str(error)) from error
+
+
 def force_sync() -> bool:
     try:
         import_inbox_once()
@@ -1434,6 +1472,8 @@ WRITE_APIS = frozenset(
         "bulk_alert",
         "delete_run",
         "rename_run",
+        "update_run_configs",
+        "update_run_lifecycle",
         "force_sync",
     }
 )
@@ -1485,6 +1525,9 @@ def _api_registry() -> dict[str, Any]:
         "get_tab_availability": get_tab_availability,
         "delete_run": delete_run,
         "rename_run": rename_run,
+        "get_run_config_revisions": get_run_config_revisions,
+        "update_run_configs": update_run_configs,
+        "update_run_lifecycle": update_run_lifecycle,
         "force_sync": force_sync,
     }
 

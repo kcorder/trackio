@@ -325,7 +325,9 @@ async def run_api_request(request: Request, api_name: str) -> Response:
             result = await result
         return JSONResponse({"data": _json_safe(result)})
     except TrackioAPIError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(
+            {"error": str(e)}, status_code=getattr(e, "status_code", 400)
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

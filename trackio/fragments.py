@@ -23,6 +23,7 @@ import huggingface_hub
 import orjson
 
 from trackio import utils
+from trackio.run_lifecycle import accept_event
 from trackio.typehints import AlertEntry, LogEntry, SystemLogEntry
 
 FRAGMENT_VERSION = 1
@@ -33,7 +34,7 @@ BUCKET_MEDIA_PREFIX = "trackio/media"
 METRIC_KIND = "metric"
 SYSTEM_METRIC_KIND = "system_metric"
 ALERT_KIND = "alert"
-KINDS = {METRIC_KIND, SYSTEM_METRIC_KIND, ALERT_KIND}
+KINDS = {METRIC_KIND, SYSTEM_METRIC_KIND, ALERT_KIND, "lifecycle"}
 
 
 def local_inbox_dir() -> Path:
@@ -191,6 +192,10 @@ def import_records(records: list[dict]) -> int:
     system_records = [r for r in records if r.get("kind") == SYSTEM_METRIC_KIND]
     alert_records = [r for r in records if r.get("kind") == ALERT_KIND]
     imported = 0
+    for record in records:
+        if record.get("kind") == "lifecycle":
+            accept_event(**record["event"])
+            imported += 1
 
     for (project, run, run_id), group in _group_by_run(metric_records).items():
         if not project or not run:

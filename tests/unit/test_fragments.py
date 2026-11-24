@@ -121,7 +121,7 @@ def test_local_run_jsonl_mode_writes_fragments(temp_dir, monkeypatch):
     assert fragment_files
 
     imported = fragments.import_inbox_dir()
-    assert imported == 2
+    assert imported == 4
     logs = SQLiteStorage.get_logs("proj", "run1")
     assert len(logs) == 2
     assert logs[0]["x"] == 1
