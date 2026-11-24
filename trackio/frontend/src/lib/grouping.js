@@ -104,6 +104,13 @@ export function computeGroupByOptions(runConfigs) {
   for (const key of nonScalarKeys) regularKeys.delete(key);
   for (const key of Object.keys(PROMOTED_RESERVED_KEYS)) regularKeys.delete(key);
   for (const key of surfacedPromotedLabels) regularKeys.delete(key);
+  const nestedKeys = [...regularKeys].filter((key) => pathForKey(key).length > 1);
+  for (const nestedKey of nestedKeys) {
+    const alias = pathForKey(nestedKey).join(".");
+    if (regularKeys.has(alias) && Object.values(runConfigs ?? {}).every((config) =>
+      Object.is(getConfigValue(config, alias), getConfigValue(config, nestedKey)),
+    )) regularKeys.delete(alias);
+  }
   const regular = [...regularKeys].sort((a, b) => configPathLabel(a).localeCompare(configPathLabel(b)))
     .map((k) => ({ label: configPathLabel(k), value: k }));
   return [{ label: "None", value: null }, ...promoted, ...regular];

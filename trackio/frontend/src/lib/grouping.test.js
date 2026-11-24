@@ -296,3 +296,31 @@ test("distinguishes nested config paths from literal dotted keys in grouping lab
   expect(configPathLabel('@["args","lr"]')).toBe("args.lr");
   expect(configPathLabel("args.lr")).toBe('["args.lr"]');
 });
+
+
+test("hides flattened aliases only when they duplicate the nested field across every run", () => {
+  const key = '@["env_args","compile_transition"]';
+  const configs = {
+    a: { env_args: { compile_transition: true }, "env_args.compile_transition": true },
+    b: { env_args: { compile_transition: false }, "env_args.compile_transition": false },
+  };
+  expect(computeGroupByOptions(configs)).toEqual([
+    none, opt("env_args.compile_transition", key),
+  ]);
+  expect(groupForRun({id: "a"}, configs, [key]).id)
+    .toBe(groupForRun({id: "a"}, configs, ["env_args.compile_transition"]).id);
+  configs.b["env_args.compile_transition"] = true;
+  expect(computeGroupByOptions(configs)).toContainEqual(
+    opt('["env_args.compile_transition"]', "env_args.compile_transition"),
+  );
+});
+
+test("retains flattened fields needed by older runs without a nested config", () => {
+  const configs = {
+    a: { env_args: { compile_transition: true }, "env_args.compile_transition": true },
+    b: { "env_args.compile_transition": true },
+  };
+  expect(computeGroupByOptions(configs)).toContainEqual(
+    opt('["env_args.compile_transition"]', "env_args.compile_transition"),
+  );
+});
