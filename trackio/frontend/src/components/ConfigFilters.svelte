@@ -1,5 +1,6 @@
 <script>
-  import { configFilterKeys, configKeyLabel, configValueChoices, parseMembership } from "../lib/runFilters.js";
+  import ConfigValuePicker from "./ConfigValuePicker.svelte";
+  import { configFilterKeys, configKeyLabel, configValueChoices } from "../lib/runFilters.js";
 
   let { configs = {}, groups = $bindable([]), matchCount = null } = $props();
   let open = $state(false);
@@ -8,7 +9,6 @@
   let count = $derived(activeGroups.flat().length);
   let dialog;
   let draft = $state([]);
-  let valueSearch = $state("");
 
   function edit() {
     draft = groups.map((group) => group.map((rule) => ({ ...rule })));
@@ -28,6 +28,11 @@
   }
   const newRule = () => ({ key: "", operator: "=", value: "" });
 
+  function filterValueLabel(rule) {
+    return rule.operator === "IN" || (rule.valueType && rule.valueType !== "string")
+      ? rule.value : JSON.stringify(rule.value);
+  }
+
   function remove(groupIndex, ruleIndex) {
     draft = draft.map((group, i) => i === groupIndex
       ? group.filter((_, j) => j !== ruleIndex) : group).filter((group) => group.length);
@@ -44,7 +49,7 @@
       {#each activeGroups as group, i}
         {#if i > 0}<div class="join">OR</div>{/if}
         {#each group as rule, j}
-          <div class="filter-summary">{j > 0 ? "AND " : ""}{configKeyLabel(rule.key)} {rule.operator} {JSON.stringify(rule.value)}</div>
+          <div class="filter-summary">{j > 0 ? "AND " : ""}{configKeyLabel(rule.key)} {rule.operator} {filterValueLabel(rule)}</div>
         {/each}
       {/each}
     </div>
@@ -66,27 +71,21 @@
       {#each group as rule, j}
         {#if j > 0}<div class="join">AND</div>{/if}
         <div class="rule">
-          <select aria-label="Configuration key" bind:value={rule.key}>
+          <select aria-label="Configuration key" bind:value={rule.key} onchange={() => { rule.value = rule.operator === "IN" ? "[]" : ""; rule.valueType = undefined; }}>
             <option value="">Select config key</option>
             {#each keys as key}<option value={key.value}>{key.label}</option>{/each}
           </select>
-          <select aria-label="Comparison operator" bind:value={rule.operator}>
+          <select aria-label="Comparison operator" bind:value={rule.operator} onchange={(event) => { rule.value = event.currentTarget.value === "IN" ? "[]" : ""; rule.valueType = undefined; }}>
             {#each ["=", "!=", ">", ">=", "<", "<=", "contains", "IN"] as operator}
               <option value={operator}>{operator}</option>
             {/each}
           </select>
-          {#if rule.operator === "IN"}
-            <fieldset>
-              <legend>Match any selected value</legend>
-              <input aria-label="Search configuration values" placeholder="Search values" bind:value={valueSearch} />
-              {#each configValueChoices(configs, rule.key).filter((choice) => choice.label.toLowerCase().includes(valueSearch.toLowerCase())) as choice}
-                <label><input type="checkbox" checked={parseMembership(rule.value).some((v) => JSON.stringify(v) === choice.token)}
-                  onchange={(event) => {
-                    const selected = parseMembership(rule.value).filter((v) => JSON.stringify(v) !== choice.token);
-                    rule.value = JSON.stringify(event.currentTarget.checked ? [...selected, JSON.parse(choice.token)] : selected);
-                  }} />{choice.label}</label>
-              {/each}
-            </fieldset>
+          {#if rule.operator === "=" || rule.operator === "IN"}
+            <div class="value-picker">
+              {#key rule.key}
+                <ConfigValuePicker choices={configValueChoices(configs, rule.key)} bind:value={rule.value} bind:valueType={rule.valueType} multiple={rule.operator === "IN"} disabled={!rule.key} />
+              {/key}
+            </div>
           {:else}
             <input aria-label="Configuration value" placeholder="Value" bind:value={rule.value} />
           {/if}
@@ -123,7 +122,7 @@
   .rule select:first-child { grid-column: 1; }
   .rule .remove { grid-column: 4; grid-row: 1; }
   .rule select:nth-of-type(2) { grid-column: 2; grid-row: 1; }
-  .rule input { grid-column: 3; grid-row: 1; }
+  .rule > input, .value-picker { grid-column: 3; grid-row: 1; min-width: 0; }
   input, select, button { font: inherit; color: inherit; border: 1px solid var(--border-color-primary); border-radius: 4px; background: var(--input-background-fill); padding: 6px; min-width: 0; }
   button { cursor: pointer; }
   .filter-group > button { margin-top: 8px; }
@@ -136,6 +135,6 @@
     .rule select:first-child { grid-column: 1 / 3; }
     .rule .remove { grid-column: 3; }
     .rule select:nth-of-type(2) { grid-column: 1; grid-row: 2; }
-    .rule input { grid-column: 2 / 4; grid-row: 2; }
+    .rule > input, .value-picker { grid-column: 2 / 4; grid-row: 2; }
   }
 </style>

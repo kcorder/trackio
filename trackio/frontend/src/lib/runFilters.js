@@ -32,6 +32,7 @@ export function parseConfigFilters(value) {
     const groups = JSON.parse(value);
     if (!Array.isArray(groups) || !groups.every((group) => Array.isArray(group) && group.every((rule) => {
       if (!rule || typeof rule.key !== "string" || typeof rule.value !== "string") return false;
+      if (rule.valueType !== undefined && !["string", "number", "boolean", "null"].includes(rule.valueType)) return false;
       const path = JSON.parse(rule.key);
       return Array.isArray(path) && path.length > 0 && path.every((key) => typeof key === "string")
         && ["=", "!=", ">", ">=", "<", "<=", "contains", "IN"].includes(rule.operator);
@@ -83,9 +84,10 @@ export function compileConfigFilter(groups, configs = {}) {
       if (actual === undefined && alias !== null) actual = configPathValue(config, [alias]);
       if (actual === undefined) return false;
       if (actual !== null && typeof actual === "object") return false;
-      const equal = typeof actual === "number"
+      const typeMatches = rule.valueType === undefined || rule.valueType === (actual === null ? "null" : typeof actual);
+      const equal = typeMatches && (typeof actual === "number"
         ? expected !== "" && actual === Number(expected)
-        : String(actual) === rule.value;
+        : String(actual) === rule.value);
       switch (rule.operator) {
         case "IN": return members.some((value) => Object.is(value, actual));
         case "=": return equal;

@@ -85,3 +85,16 @@ it("retains conflicting literal dotted filter fields and never falls back to the
   expect(match(configs.a)).toBe(true);
   expect(match(configs.b)).toBe(false);
 });
+
+it("keeps selected equality values typed while preserving legacy text filters", () => {
+  for (const [value, valueType, actual, other] of [["1","number",1,"1"],["1","string","1",1],["false","boolean",false,"false"],["null","null",null,"null"]]) {
+    const groups = [[{key:'["x"]',operator:"=",value,valueType}]];
+    expect(parseConfigFilters(JSON.stringify(groups))).toEqual(groups);
+    const match = compileConfigFilter(groups);
+    expect(match({x:actual})).toBe(true);
+    expect(match({x:other})).toBe(false);
+  }
+  const legacy = compileConfigFilter([[{key:'["x"]',operator:"=",value:"1"}]]);
+  expect(legacy({x:1})).toBe(true);
+  expect(legacy({x:"1"})).toBe(true);
+});

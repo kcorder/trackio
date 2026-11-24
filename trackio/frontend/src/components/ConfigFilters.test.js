@@ -11,7 +11,7 @@ vi.mock("../lib/runFilters.js", async (importOriginal) => {
 it("applies draft groups, preserves active filters on cancel, and clears the summary", async () => {
   const target = document.createElement("div");
   document.body.appendChild(target);
-  const component = mount(ConfigFilters, { target, props: { configs: { a: { batch_size: 32 } }, matchCount: 0 } });
+  const component = mount(ConfigFilters, { target, props: { configs: { a: { batch_size: 32 }, b: {batch_size:64}, c:{batch_size:128}, d:{batch_size:999} }, matchCount: 0 } });
   await tick();
   const dialog = target.querySelector("dialog");
   dialog.showModal = vi.fn(() => { dialog.open = true; });
@@ -23,10 +23,11 @@ it("applies draft groups, preserves active filters on cancel, and clears the sum
   const setRule = async (index, value) => {
     const select = target.querySelectorAll('[aria-label="Configuration key"]')[index];
     select.value = '["batch_size"]';
-    select.dispatchEvent(new Event("change"));
-    const input = target.querySelectorAll("input")[index];
+    select.dispatchEvent(new Event("change", {bubbles:true}));
+    await tick();
+    const input = target.querySelectorAll('[aria-label="Configuration value"]')[index];
     input.value = value;
-    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new Event("change", {bubbles:true}));
     await tick();
   };
   try {
@@ -41,7 +42,7 @@ it("applies draft groups, preserves active filters on cancel, and clears the sum
     expect(target.querySelector(".active-filters")).toBeNull();
     await click("Apply filters");
     expect(dialog.open).toBe(false);
-    expect(target.querySelector(".active-filters").textContent).toContain('AND batch_size = "64"');
+    expect(target.querySelector(".active-filters").textContent).toContain('AND batch_size = 64');
     expect(target.querySelector(".active-filters").textContent).toContain('OR');
     expect(target.querySelector('[role="status"]').textContent).toContain("No runs match");
     await click("Config filters (3)");
@@ -49,7 +50,7 @@ it("applies draft groups, preserves active filters on cancel, and clears the sum
     await click("Cancel");
     expect(target.querySelector(".active-filters").textContent).not.toContain("999");
     await click("Config filters (3)");
-    expect(target.querySelector("input").value).toBe("32");
+    expect(target.querySelector('[aria-label="Configuration value"]').value).toBe("32");
     await click("×");
     await click("Config filters (3)");
     target.querySelector('[aria-label="Remove condition"]').click();
@@ -112,6 +113,43 @@ it("offers one nested field for matching flattened aliases in the dialog", async
     const options = [...target.querySelector('[aria-label="Configuration key"]').options];
     expect(options.map((option) => option.textContent)).toEqual(["Select config key", "env_args.compile_transition"]);
     expect(options[1].value).toBe('["env_args","compile_transition"]');
+  } finally {
+    await unmount(component);
+    target.remove();
+  }
+});
+
+it("selects multiple observed values from the IN dropdown and restores them", async () => {
+  const target = document.createElement("div");
+  document.body.appendChild(target);
+  const component = mount(ConfigFilters, {target,props:{configs:{a:{flag:true},b:{flag:false},c:{flag:"false"}}}});
+  const click = async (text) => {
+    [...target.querySelectorAll("button")].find((button) => button.textContent === text).click();
+    await tick();
+  };
+  try {
+    await tick();
+    const dialog = target.querySelector("dialog");
+    dialog.showModal = () => {dialog.open=true;};
+    dialog.close = () => {dialog.open=false;};
+    await click("Config filters");
+    await click("+ Add filter");
+    const key = target.querySelector('[aria-label="Configuration key"]');
+    key.value='["flag"]';
+    key.dispatchEvent(new Event("change",{bubbles:true}));
+    const operator = target.querySelector('[aria-label="Comparison operator"]');
+    operator.value="IN";
+    operator.dispatchEvent(new Event("change",{bubbles:true}));
+    await tick();
+    const checkbox = [...target.querySelectorAll("label")].find((label) => label.textContent.trim() === '"false"').querySelector("input");
+    checkbox.checked=true;
+    checkbox.dispatchEvent(new Event("change",{bubbles:true}));
+    await tick();
+    expect(target.querySelector("summary").textContent.trim()).toBe("1 selected");
+    await click("Apply filters");
+    expect(target.querySelector(".active-filters").textContent).toContain('IN ["false"]');
+    await click("Config filters (1)");
+    expect(target.querySelector('input[type="checkbox"]:checked').closest("label").textContent.trim()).toBe('"false"');
   } finally {
     await unmount(component);
     target.remove();

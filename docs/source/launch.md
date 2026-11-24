@@ -191,7 +191,8 @@ Check the [demo notebook](https://github.com/gradio-app/trackio/blob/main/exampl
 ## Organizing dashboard runs
 
 Use **Config filters** to combine comparisons with AND/OR conditions. The `IN`
-operator provides a searchable selection of observed scalar values; numbers,
+operator provides a searchable multi-select dropdown of observed scalar values;
+`=` provides a single-value dropdown. Neither requires typing a value. Numbers,
 strings, booleans, and null are distinct selections. Missing fields do not match.
 
 **Group by** accepts multiple config fields and stays active when switching
