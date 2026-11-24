@@ -376,3 +376,17 @@ _SCHEMA_MIGRATIONS = {2: _migrate_add_run_ids, 3: _split_loss_column}
 ## Stability Notes
 
 Trackio is still in beta. The schema is documented here so humans and agents can query it directly, but future releases may evolve the schema and require migrations or regenerated local databases.
+
+## Dashboard edits and lifecycle metadata
+
+Schema version 3 adds `dashboard_config_overrides` (`run_id`, `overrides`,
+`revision`). Its JSON maps encoded path arrays to manually edited scalar values.
+Dashboard config reads merge these edits over the logged config. Direct SQL on
+`configs` shows the uploaded base; config parquet exports show effective values,
+and an override sidecar preserves edits and revisions across synchronization.
+
+Schema version 4 adds `run_lifecycle` (`run_id`, `run_name`, `started_at`,
+`session_id`, `finished_at`) and the local retry queue `run_lifecycle_outbox`.
+Lifecycle metadata is exported separately; pending transport events stay local.
+These tables do not add synthetic metric rows. Activity/cadence is derived from
+recent distinct user-log timestamps when the dashboard queries runs.

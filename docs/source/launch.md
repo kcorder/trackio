@@ -187,3 +187,48 @@ trackio.show()
 ```
 
 Check the [demo notebook](https://github.com/gradio-app/trackio/blob/main/examples/notebook_integration.ipynb).
+
+## Organizing dashboard runs
+
+Use **Config filters** to combine comparisons with AND/OR conditions. The `IN`
+operator provides a searchable selection of observed scalar values; numbers,
+strings, booleans, and null are distinct selections. Missing fields do not match.
+
+**Group by** accepts multiple config fields and stays active when switching
+between Metrics and Runs. Runs groups can be collapsed without changing the
+selection. Metrics can show a mean curve with either the observed min–max range
+or ±1 population standard deviation. Each contributing run has equal weight
+at an aligned x position; neither band is a confidence interval. A singleton
+has zero standard deviation. CSV exports retain observed bounds and include SD,
+the selected band method, and displayed bounds. PNG exports identify the band.
+
+In Runs, expand **Config columns** to choose fields. Click a scalar cell to edit
+it, use **+ Config** to add a field to a run, or select rows and use **Set config
+field on selected runs** for a confirmed bulk edit. Choose the value type
+explicitly. A field can be a literal name or a JSON path array, such as
+`["args", "experiment_name"]`. Reserved top-level fields, arrays, and objects
+are read-only. Editing requires the same write access as renaming/deleting runs.
+
+Dashboard edits are persisted separately from uploaded config and take precedence
+in dashboard reads and exports. Logging uploads cannot overwrite them, and they
+do not change the training process's in-memory config. Concurrent dashboard edits
+use revisions; a conflict requires refreshing and retrying. A bulk operation
+succeeds for all selected runs or none of them.
+
+**Saved views** live in this browser, scoped to the dashboard and project. Save,
+open, update, rename, or delete named views, or copy a view link to share the
+controls. Views include grouping, config filters, run/metric regexes, band method,
+smoothing, axes/scales, layout, and config columns. They do not freeze a list of
+run IDs. The latest working controls are restored automatically after reloading
+or restarting the browser, unless an explicit view URL takes precedence.
+
+A small green dot indicates a running session with recent user logging. Its
+expiry is five times the median of recent logging intervals, with a 30-second
+minimum and a 15-minute fallback when cadence is unknown. Automatic CPU/GPU
+logging does not extend this period. Gray means finished or inactive; a stale
+session is not automatically marked finished. Runs created with older Trackio
+versions have unknown lifecycle state. Static dashboards do not show live status.
+
+Hover over a run in the Metrics sidebar, or focus it with the keyboard, to reveal
+**×**. This permanently deletes its data after confirmation; it uses the same
+permissions as deletion from Runs.
