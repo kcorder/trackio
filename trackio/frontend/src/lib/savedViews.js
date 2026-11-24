@@ -11,7 +11,7 @@ export function normalizeView(value) {
   if (!value || typeof value !== "object") return result;
   for (const [key, fallback] of Object.entries(VIEW_DEFAULTS)) {
     if (Array.isArray(fallback)) {
-      if (Array.isArray(value[key])) result[key] = structuredClone(value[key]);
+      if (Array.isArray(value[key])) result[key] = JSON.parse(JSON.stringify(value[key]));
     } else if (typeof value[key] === typeof fallback) result[key] = value[key];
   }
   result.configFilters = parseConfigFilters(JSON.stringify(result.configFilters));
@@ -29,7 +29,7 @@ export function readViews(key, storage = null) {
   try {
     const data = JSON.parse((storage ?? globalThis.localStorage).getItem(key));
     if (data?.version !== VERSION) return { version: VERSION, named: {}, latest: null };
-    return { version: VERSION, named: data.named && typeof data.named === "object" ? data.named : {}, latest: data.latest ? normalizeView(data.latest) : null };
+    return { version: VERSION, active: typeof data.active === "string" ? data.active : "", named: data.named && typeof data.named === "object" ? data.named : {}, latest: data.latest ? normalizeView(data.latest) : null };
   } catch {
     return { version: VERSION, named: {}, latest: null };
   }

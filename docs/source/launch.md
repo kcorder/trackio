@@ -217,7 +217,10 @@ succeeds for all selected runs or none of them.
 
 **Saved views** live in this browser, scoped to the dashboard and project. Save,
 open, update, rename, or delete named views, or copy a view link to share the
-controls. Views include grouping, config filters, run/metric regexes, band method,
+controls. The View dropdown shows the active name; an asterisk marks unsaved
+changes. Selecting a saved name opens it immediately. **Save** updates that view,
+and **Delete** removes it. **Save as**, **Rename**, and **Copy view link** are in
+the **More view actions** menu. Views include grouping, config filters, run/metric regexes, band method,
 smoothing, axes/scales, layout, and config columns. They do not freeze a list of
 run IDs. The latest working controls are restored automatically after reloading
 or restarting the browser, unless an explicit view URL takes precedence.
