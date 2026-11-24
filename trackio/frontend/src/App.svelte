@@ -302,7 +302,6 @@
 
   $effect(() => {
     selectedProject;
-    configFilters = [];
     groupByKeys = [];
   });
 

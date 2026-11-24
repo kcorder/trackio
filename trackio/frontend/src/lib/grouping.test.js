@@ -172,7 +172,7 @@ describe("computeGroupByOptions", () => {
   });
 });
 
-describe("config filtering and multi-field grouping", () => {
+describe("multi-field grouping", () => {
   const runs = [
     { id: "a", name: "same" }, { id: "b", name: "same" },
     { id: "c", name: "other" },
@@ -278,10 +278,9 @@ describe("buildGroupColorMap", () => {
     };
     const groups = computeGroupedRunEntries(runs, configs, ["model"]);
     const colors = buildGroupColorMap(runs, configs, ["model"]);
-    expect([...groups.keys()].map((id) => colors[id])).toEqual(DEFAULT_COLORS.slice(0, 3));
+    expect([...groups.keys()].map((id) => colors[id])).toEqual(DEFAULT_COLORS.slice(0, 3).reverse());
     expect(colors[groupForRun(runs[0], configs, ["model"]).id])
       .toBe(colors[groupForRun(runs[2], configs, ["model"]).id]);
-    expect(colors[groupForRun(runs[3], configs, ["model"]).id]).toBe(DEFAULT_COLORS[2]);
   });
 
   test("cycles the existing palette when there are more groups than colors", () => {

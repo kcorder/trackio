@@ -47,7 +47,6 @@
     groupByKeys = $bindable([]),
     showGroupedMean = $bindable(true),
     runConfigs = {},
-    configFilters = $bindable([]),
     metricColumns = [],
     spacesMode = false,
     runMutationAllowed = true,
@@ -253,7 +252,6 @@
           <ConfigFilters configs={runConfigs} bind:groups={configFilters} matchCount={filteredRuns.length} />
         </div>
       {/if}
-
 
       {#if variant === "full"}
         {#if currentPage === "metrics" && spacesMode}

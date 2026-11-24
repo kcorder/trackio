@@ -9,6 +9,7 @@ vi.mock("vega-embed", () => ({ default: vi.fn() }));
 vi.mock("vega", () => ({
   changeset: () => ({ remove() { return this; }, insert() { return this; } }),
   truthy: () => true,
+  textMetrics: { width: (_font, text) => text.length * 6 },
 }));
 vi.mock("../lib/chartImage.js", () => ({ downloadChartImage: vi.fn() }));
 
@@ -37,6 +38,9 @@ beforeEach(() => {
     width() { return this; },
     resize() { return this; },
     run() { return this; },
+    async runAsync() { return this; },
+    scale() { return { bandwidth: () => 100 }; },
+    signal(_name, value) { return value === undefined ? 100 : this; },
     change() { return this; },
     finalize() {},
   };

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { computeGroupedMetric, groupedCsvExports, buildRawGroupedRows } from "./groupedMetrics.js";
+import { compileConfigFilter, filterRunsByConfig } from "./runFilters.js";
 import { serializeCsv } from "./csv.js";
 
 describe("grouped metric aggregation", () => {
@@ -110,4 +111,28 @@ describe("grouped metric aggregation", () => {
     expect(result.rows.length).toBeLessThanOrEqual(5000);
     expect(new Set(result.rows.map((row) => row.group)).size).toBe(70);
   });
+});
+
+test("upstream OR and AND filters constrain grouped aggregates and exports by run ID", () => {
+  const runs = ["a", "b", "c", "d"].map((id) => ({ id, name: "same" }));
+  const configs = {
+    a: { args: { model: "small" }, seed: 1 },
+    b: { args: { model: "small" }, seed: 2 },
+    c: { args: { model: "small" }, seed: 3 },
+    d: { args: { model: "large" }, seed: 1 },
+  };
+  const rule = (path, operator, value) => ({ key: JSON.stringify(path), operator, value });
+  const match = compileConfigFilter([
+    [rule(["args", "model"], "=", "small"), rule(["seed"], ">=", "2")],
+    [rule(["args", "model"], "=", "large")],
+  ]);
+  const selected = filterRunsByConfig(runs, configs, match);
+  expect(selected.map((run) => run.id)).toEqual(["b", "c", "d"]);
+  const rows = [100, 2, 4, 8].map((loss, i) => ({ run_id: runs[i].id, step: 1, loss }));
+  const result = computeGroupedMetric(rows, "loss", "step", selected, configs, ['@["args","model"]']);
+  expect(result.rows.find((row) => row.group === "small")).toMatchObject({
+    loss: 3, run_min: 2, run_max: 4, n: 2,
+  });
+  const [, summary] = groupedCsvExports(result, "loss", "step", []);
+  expect(summary.rows.find((row) => row.group === "small")).toMatchObject({ mean: 3, n: 2 });
 });
