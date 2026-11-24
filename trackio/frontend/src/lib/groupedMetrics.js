@@ -1,4 +1,4 @@
-import { buildRunGroups, configPathLabel, groupForRun } from "./grouping.js";
+import { buildRunGroups, configPathLabel } from "./grouping.js";
 import { processRunData } from "./dataProcessing.js";
 
 const MAX_GRID_POINTS = 1000;
@@ -131,13 +131,14 @@ export function computeGroupedMetric(masterData, metric, xColumn, runs, runConfi
 }
 
 export function buildRawGroupedRows(logsByRun, metric, xAxis, runs, runConfigs, keys) {
+  const runGroups = buildRunGroups(runs, runConfigs, keys);
   const fields = csvFields(keys);
   const rows = [];
   for (const run of runs) {
     const logs = logsByRun.get(run.id ?? run.name);
     const processed = processRunData(logs, run, 0, xAxis, false, false);
     if (!processed) continue;
-    const group = groupForRun(run, runConfigs, keys);
+    const group = runGroups.get(run.id ?? run.name);
     for (const row of processed.rows) {
       if (!Number.isFinite(row[metric])) continue;
       const out = {

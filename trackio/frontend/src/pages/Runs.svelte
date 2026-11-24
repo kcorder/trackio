@@ -3,7 +3,7 @@
   import { configFilterKeys, configKeyLabel } from "../lib/runFilters.js";
   import { getRunConfigRevisions, updateRunConfigs } from "../lib/api.js";
   import { compileConfigFilter, filterRunsByConfig } from "../lib/runFilters.js";
-  import { computeGroupedRunEntries, groupForRun } from "../lib/grouping.js";
+  import { computeGroupedRunEntries, buildRunGroups } from "../lib/grouping.js";
   import { tick, untrack } from "svelte";
   import LoadingTrackio from "../components/LoadingTrackio.svelte";
   import {
@@ -105,6 +105,8 @@
   let collapsedGroups = $state(new Set());
   let groupedRows = $derived(computeGroupedRunEntries(filteredRuns, runConfigs, groupByKeys));
   let tableRows = $derived(groupedRows ? [...groupedRows.values()].flatMap((group) => group.runs) : filteredRuns);
+
+  let tableRunGroups = $derived(buildRunGroups(tableRows, runConfigs, groupByKeys));
 
   let selectedVisibleRuns = $derived(
     selectionProject === project
@@ -329,8 +331,8 @@
       </thead>
       <tbody>
         {#each tableRows as run, i}
-          {@const group = groupByKeys.length ? groupForRun(run, runConfigs, groupByKeys) : null}
-          {#if group && (i === 0 || groupForRun(tableRows[i - 1], runConfigs, groupByKeys).id !== group.id)}
+          {@const group = groupByKeys.length ? tableRunGroups.get(run.id ?? run.name) : null}
+          {#if group && (i === 0 || tableRunGroups.get(tableRows[i - 1].id ?? tableRows[i - 1].name).id !== group.id)}
             <tr><td colspan={(hasArtifacts ? 7 : 6) + configColumns.length}><button aria-expanded={!collapsedGroups.has(group.id)}
               onclick={() => { const next = new Set(collapsedGroups); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); collapsedGroups = next; }}>{group.label} ({groupedRows.get(group.id).runs.length})</button></td></tr>
           {/if}

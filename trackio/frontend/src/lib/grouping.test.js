@@ -315,12 +315,25 @@ test("hides flattened aliases only when they duplicate the nested field across e
   );
 });
 
-test("retains flattened fields needed by older runs without a nested config", () => {
+test("unifies grouping across older flattened and newer nested configs", () => {
+  const key = '@["env_args","compile_transition"]';
   const configs = {
     a: { env_args: { compile_transition: true }, "env_args.compile_transition": true },
     b: { "env_args.compile_transition": true },
+    c: { env_args: { compile_transition: true } },
+    d: {},
   };
-  expect(computeGroupByOptions(configs)).toContainEqual(
-    opt('["env_args.compile_transition"]', "env_args.compile_transition"),
-  );
+  expect(computeGroupByOptions(configs)).toEqual([none, opt("env_args.compile_transition", key)]);
+  const runs = Object.keys(configs).map((id) => ({id}));
+  const groups = computeGroupedRunEntries(runs, configs, [key]);
+  expect([...groups.values()].map((group) => group.runs.map((run) => run.id))).toEqual([["a", "b", "c"], ["d"]]);
+});
+
+test("keeps incompatible flat and nested field values distinct", () => {
+  const key = '@["args","seed"]';
+  for (const flat of ["1", false, null]) {
+    const configs = { a: {args: {seed: 1}, "args.seed": flat}, b: {"args.seed": 1} };
+    expect(computeGroupByOptions(configs)).toContainEqual(opt('["args.seed"]', "args.seed"));
+    expect(groupForRun({id:"b"}, configs, [key]).label).toBe("(unset)");
+  }
 });

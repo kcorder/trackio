@@ -156,3 +156,16 @@ test("population SD weights runs equally and is zero for a singleton", () => {
   expect(result.rows.find((row) => row.group === "small")).toMatchObject({loss:4,std:2,run_min:2,run_max:6,n:2});
   expect(result.rows.find((row) => row.group === "large").std).toBe(0);
 });
+
+test("aggregates and exports flat-only and nested-only runs as one config group", () => {
+  const runs = [{id:"old",name:"old"}, {id:"new",name:"new"}];
+  const configs = {old:{"env_args.compile_transition":true}, new:{env_args:{compile_transition:true}}};
+  const keys = ['@["env_args","compile_transition"]'];
+  const rows = [{run_id:"old",step:0,loss:2},{run_id:"new",step:0,loss:4}];
+  const result = computeGroupedMetric(rows, "loss", "step", runs, configs, keys);
+  expect(result.rows).toHaveLength(1);
+  expect(result.rows[0]).toMatchObject({loss:3,n:2,"config.env_args.compile_transition":true});
+  const raw = buildRawGroupedRows(new Map([["old",[{step:0,loss:2}]],["new",[{step:0,loss:4}]]]), "loss", "step", runs, configs, keys);
+  expect(raw.map((row) => row.group)).toEqual(["true","true"]);
+  expect(raw.map((row) => row["config.env_args.compile_transition"])).toEqual([true,true]);
+});

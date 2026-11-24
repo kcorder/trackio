@@ -42,6 +42,27 @@ function getConfigValue(config, key) {
   return value;
 }
 
+function compatibleAliases(runConfigs, keys) {
+  const aliases = new Map();
+  for (const key of keys) {
+    const path = pathForKey(key);
+    if (path.length < 2) continue;
+    const flat = path.join(".");
+    const configs = Object.values(runConfigs ?? {});
+    if (configs.some((config) => getConfigValue(config, flat) !== undefined)
+      && configs.every((config) => {
+        const nested = getConfigValue(config, key);
+        const literal = getConfigValue(config, flat);
+        return (nested === undefined || literal === undefined || Object.is(nested, literal))
+          && [nested, literal].every((value) => value == null || typeof value !== "object");
+      })) {
+      aliases.set(key, flat);
+      aliases.set(flat, key);
+    }
+  }
+  return aliases;
+}
+
 function configForRun(run, runConfigs) {
   return (runConfigs ?? {})[run.id] ?? (runConfigs ?? {})[run.name] ?? {};
 }
@@ -105,21 +126,23 @@ export function computeGroupByOptions(runConfigs) {
   for (const key of Object.keys(PROMOTED_RESERVED_KEYS)) regularKeys.delete(key);
   for (const key of surfacedPromotedLabels) regularKeys.delete(key);
   const nestedKeys = [...regularKeys].filter((key) => pathForKey(key).length > 1);
+  const aliases = compatibleAliases(runConfigs, nestedKeys);
   for (const nestedKey of nestedKeys) {
-    const alias = pathForKey(nestedKey).join(".");
-    if (regularKeys.has(alias) && Object.values(runConfigs ?? {}).every((config) =>
-      Object.is(getConfigValue(config, alias), getConfigValue(config, nestedKey)),
-    )) regularKeys.delete(alias);
+    if (aliases.has(nestedKey)) regularKeys.delete(aliases.get(nestedKey));
   }
   const regular = [...regularKeys].sort((a, b) => configPathLabel(a).localeCompare(configPathLabel(b)))
     .map((k) => ({ label: configPathLabel(k), value: k }));
   return [{ label: "None", value: null }, ...promoted, ...regular];
 }
 
-export function groupForRun(run, runConfigs, groupBy) {
+export function groupForRun(run, runConfigs, groupBy, aliases = null) {
   const keys = Array.isArray(groupBy) ? groupBy : groupBy ? [groupBy] : [];
   const config = configForRun(run, runConfigs);
-  const values = keys.map((key) => getConfigValue(config, key));
+  aliases ??= compatibleAliases(runConfigs, keys);
+  const values = keys.map((key) => {
+    const value = getConfigValue(config, key);
+    return value === undefined && aliases.has(key) ? getConfigValue(config, aliases.get(key)) : value;
+  });
   const label = keys.length === 1
     ? valueLabel(values[0])
     : keys.map((key, i) => `${configPathLabel(key)}=${valueLabel(values[i])}`).join(" | ");
@@ -131,22 +154,24 @@ export function groupForRun(run, runConfigs, groupBy) {
 }
 
 export function buildRunGroups(runs, runConfigs, groupBy) {
+  const aliases = compatibleAliases(runConfigs, Array.isArray(groupBy) ? groupBy : groupBy ? [groupBy] : []);
   return new Map(runs.map((run) => [
     run.id ?? run.name,
-    groupForRun(run, runConfigs, groupBy),
+    groupForRun(run, runConfigs, groupBy, aliases),
   ]));
 }
 
 export function buildGroupColorMap(runs, runConfigs, groupBy) {
-  const ids = [...new Set(runs.map((run) => groupForRun(run, runConfigs, groupBy).id))];
+  const ids = [...new Set([...buildRunGroups(runs, runConfigs, groupBy).values()].map((group) => group.id))];
   return buildColorMap(ids);
 }
 
 export function computeGroupedRuns(filteredRuns, runConfigs, groupBy) {
   if (!groupBy || (Array.isArray(groupBy) && groupBy.length === 0)) return null;
   const groups = new Map();
+  const runGroups = buildRunGroups(filteredRuns, runConfigs, groupBy);
   for (const run of filteredRuns) {
-    const label = groupForRun(run, runConfigs, groupBy).label;
+    const label = runGroups.get(run.id ?? run.name).label;
     if (!groups.has(label)) groups.set(label, []);
     groups.get(label).push(run);
   }
@@ -156,8 +181,9 @@ export function computeGroupedRuns(filteredRuns, runConfigs, groupBy) {
 export function computeGroupedRunEntries(filteredRuns, runConfigs, groupBy) {
   if (!groupBy?.length) return null;
   const groups = new Map();
+  const runGroups = buildRunGroups(filteredRuns, runConfigs, groupBy);
   for (const run of filteredRuns) {
-    const group = groupForRun(run, runConfigs, groupBy);
+    const group = runGroups.get(run.id ?? run.name);
     if (!groups.has(group.id)) groups.set(group.id, { label: group.label, runs: [] });
     groups.get(group.id).runs.push(run);
   }
